@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 import random
-
+from tqdm import trange
 random.seed(1)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -27,7 +27,7 @@ class KDDataset(Dataset):
         self.num_items = pickle_data['num_base_block_items']
         self.neg_items = {}
 
-        for i in range(self.num_users):
+        for i in trange(self.num_users):
             self.neg_items[i] = []
             for j in range(self.num_items):
                 if j not in self.pos_items[i]:
@@ -40,7 +40,13 @@ class KDDataset(Dataset):
         user = self.data[idx][0]
         pos_item = self.data[idx][1]
         neg_item = random.choice(self.neg_items[user])
-        mini_batch = {"user": torch.LongTensor(user).to(device),
-                      "pos_item": torch.LongTensor(pos_item).to(device),
-                      "neg_item": torch.LongTensor(neg_item).to(device)}
+        mini_batch = {"user": torch.LongTensor([user]),
+                      "pos_item": torch.LongTensor([pos_item]),
+                      "neg_item": torch.LongTensor([neg_item])}
         return mini_batch
+
+    def get_user_num(self):
+        return self.num_users
+
+    def get_item_num(self):
+        return self.num_items
