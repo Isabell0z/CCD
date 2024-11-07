@@ -11,7 +11,7 @@ from dataset import KDDataset
 from models import TransformerSelf
 device = "cuda" if torch.cuda.is_available() else "cpu"
 class KD:
-    def __init__(self, dataloader, experts_num, experts_dims, t_model, s_model, K, DE_lambda=0.001, RRD_lambda=0.0001,
+    def __init__(self, dataloader, experts_num, experts_dims, t_model, s_model:nn.Module, K, experts=None, DE_lambda=0.001, RRD_lambda=0.0001,
                  device='cuda'):
         """_summary_
 
@@ -31,15 +31,21 @@ class KD:
         self.experts_num = experts_num
         self.t_model = t_model.to(device)
         self.s_model = s_model.to(device)
+        
         self.user_experts = nn.ModuleList([Expert(experts_dims[0], 
                                                   experts_dims[1], 
-                                                  experts_dims[2]).to(device) 
+                                                  experts_dims[2])
                                            for _ in range(self.experts_num)])
         # pos + neg -> size*2
         self.item_experts = nn.ModuleList([Expert(experts_dims[0]*2, 
                                                   experts_dims[1]*2, 
-                                                  experts_dims[2]*2).to(device)
+                                                  experts_dims[2]*2)
                                            for _ in range(self.experts_num)])
+        if experts is not None:
+            self.user_experts.load_state_dict(experts["user_experts"])
+            self.item_experts.load_state_dict(experts["item_experts"])
+        self.user_experts.to(device)
+        self.item_experts.to(device)
         self.K = K
         self.DE_lambda = DE_lambda
         self.RRD_lambda = RRD_lambda
@@ -49,7 +55,7 @@ class KD:
         self.s_model.train()
         optimizer = torch.optim.Adam([{"params": self.user_experts.parameters()}, {"params": self.item_experts.parameters()}],
                                      lr=0.01)
-        optimizer_base = torch.optim.Adam(self.s_model.parameters(), lr=0.001)
+        optimizer_base = torch.optim.Adam(self.s_model.parameters(), lr=0.0005)
         pbar = tqdm(range(epoch), desc="Training")
         t_score_mat = self.t_model.get_score_mat()
         for e in pbar:
@@ -94,9 +100,9 @@ class KD:
             pbar.set_postfix({"loss": loss_sum, "base_loss": base_loss_sum})
     
     def save_models(self, save_path):
-        torch.save(self.s_model.state_dict, os.path.join(save_path, "student.pt"))
-        torch.save(self.item_experts.state_dict, os.path.join(save_path, f"{self.experts_num}_item_experts.pt"))
-        torch.save(self.user_experts.state_dict, os.path.join(save_path, f"{self.experts_num}_user_experts.pt"))
+        torch.save(self.s_model.state_dict(), os.path.join(save_path, "student.pt"))
+        torch.save(self.item_experts.state_dict(), os.path.join(save_path, f"{self.experts_num}_item_experts.pt"))
+        torch.save(self.user_experts.state_dict(), os.path.join(save_path, f"{self.experts_num}_user_experts.pt"))
 
 if __name__ == "__main__":
     # load data
@@ -104,15 +110,15 @@ if __name__ == "__main__":
     yelp_data = "original-CCD/dataset/Yelp/TASK_0.pickle"
     with open(yelp_data, "rb") as f:
         data = pickle.load(f)
-    save_path = "students"
+    students_path = "students"
     model_name = "transformer"
-    if not os.path.exists(f"{save_path}/{model_name}"):
-        os.makedirs(f"{save_path}/{model_name}")
+    if not os.path.exists(f"{students_path}/{model_name}"):
+        os.makedirs(f"{students_path}/{model_name}")
     train_dataset = KDDataset(pickle_data=data, level='train')
     dataloader = DataLoader(train_dataset, batch_size=2 ** 12, shuffle=True)
     # init teacher model
-    teacher_embedding_dim = 8
-    student_embedding_dim = 4
+    teacher_embedding_dim = 1024
+    student_embedding_dim = 128
     user_num = train_dataset.get_user_num()
     item_num = train_dataset.get_item_num()
     teacher_model = TransformerSelf(num_users=user_num, 
@@ -122,24 +128,31 @@ if __name__ == "__main__":
                             num_layers=2)
     ckpt = torch.load("teachers/transformer.pt")
     teacher_model.load_state_dict(ckpt)
-    # init student model
+    # init or load student model
     student_model = TransformerSelf(num_users=user_num, 
                             num_items=item_num, 
                             embedding_dim=student_embedding_dim, 
                             nhead=2, 
-                            num_layers=1)
+                            num_layers=2)
+    ckpt_s = torch.load(f"{students_path}/{model_name}/student.pt")
+    student_model.load_state_dict(ckpt_s)
+    # load expert models
+    experts = {"item_experts": torch.load(f"{students_path}/{model_name}/5_item_experts.pt"),
+               "user_experts": torch.load(f"{students_path}/{model_name}/5_user_experts.pt")}
+    experts = None
     # KD
     # instantiate kd
     kd = KD(dataloader=dataloader,
-            experts_num=4,
+            experts_num=5,
             experts_dims=[student_embedding_dim,teacher_embedding_dim*2,teacher_embedding_dim],
             t_model=teacher_model,
             s_model=student_model,
-            K=10)
+            K=10,
+            experts=experts)
     # run kd
-    kd.train(epoch=1000)
+    kd.train(epoch=100)
     # save
-    kd.save_models(f"{save_path}/{model_name}")
+    kd.save_models(f"{students_path}/{model_name}")
     # end
 
 
