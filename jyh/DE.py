@@ -37,5 +37,5 @@ def compute_DE_loss(s_emb, t_emb, expert):
     expert_result = expert(s_emb)
 
     # compute loss
-    DE_loss = nn.functional.mse_loss(expert_result, t_emb, reduction='mean')
+    DE_loss = nn.functional.mse_loss(expert_result, t_emb, reduction='sum')
     return DE_loss

@@ -1,19 +1,45 @@
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
+import pickle
 from tqdm import tqdm
+import os
 
 from DE import Expert, compute_DE_loss
 from RRD import compute_RRD_loss
-
-
+from dataset import KDDataset
+from models import TransformerSelf
+device = "cuda" if torch.cuda.is_available() else "cpu"
 class KD:
-    def __init__(self, dataloader, experts_num, experts_dims, t_model, s_model, K, DE_lambda=0.01, RRD_lambda=0.001,
+    def __init__(self, dataloader, experts_num, experts_dims, t_model, s_model, K, DE_lambda=0.001, RRD_lambda=0.0001,
                  device='cuda'):
+        """_summary_
+
+        Args:
+            dataloader (Dataloader): 
+            experts_num (int): number of experts
+            experts_dims (list): [in, hidden, out];
+                    in=student_embedding_size, out=teacher_embedding_size
+            t_model (nn.Module): teacher model
+            s_model (nn.Module): student model
+            K (int): length of recommandation list
+            DE_lambda (float, optional): Defaults to 0.01.
+            RRD_lambda (float, optional): Defaults to 0.001.
+            device (str, optional): Defaults to 'cuda'.
+        """
         self.dataloader = dataloader
         self.experts_num = experts_num
-        self.t_model = t_model
-        self.s_model = s_model
-        self.experts = nn.ModuleList([Expert(experts_dims[0], experts_dims[1], experts_dims[2])])
+        self.t_model = t_model.to(device)
+        self.s_model = s_model.to(device)
+        self.user_experts = nn.ModuleList([Expert(experts_dims[0], 
+                                                  experts_dims[1], 
+                                                  experts_dims[2]).to(device) 
+                                           for _ in range(self.experts_num)])
+        # pos + neg -> size*2
+        self.item_experts = nn.ModuleList([Expert(experts_dims[0]*2, 
+                                                  experts_dims[1]*2, 
+                                                  experts_dims[2]*2).to(device)
+                                           for _ in range(self.experts_num)])
         self.K = K
         self.DE_lambda = DE_lambda
         self.RRD_lambda = RRD_lambda
@@ -21,51 +47,99 @@ class KD:
     def train(self, epoch):
         self.t_model.eval()
         self.s_model.train()
-        optimizer = torch.optim.Adam([{"params": self.s_model.parameters()}, {"params": self.experts.parameters()}],
+        optimizer = torch.optim.Adam([{"params": self.user_experts.parameters()}, {"params": self.item_experts.parameters()}],
                                      lr=0.01)
-        pbar = tqdm(range(epoch), desc="epoch")
+        optimizer_base = torch.optim.Adam(self.s_model.parameters(), lr=0.001)
+        pbar = tqdm(range(epoch), desc="Training")
+        t_score_mat = self.t_model.get_score_mat()
         for e in pbar:
             loss_sum = 0.0
-
+            base_loss_sum = 0.0
             for i, batch in enumerate(self.dataloader):
                 optimizer.zero_grad()
-
+                optimizer_base.zero_grad()
+                batch = {k:batch[k].to(device) for k in batch.keys()}
                 with torch.no_grad():
-                    t_pos_score, t_neg_score, t_item_emb, t_user_emb = self.t_model(batch)
+                    t_item_emb, t_user_emb = self.t_model.get_embedding(batch)
                 s_pos_score, s_neg_score, s_item_emb, s_user_emb = self.s_model(batch)
                 # DE loss
-                expert = self.experts[e % self.experts_num]
-                user_DE_loss = compute_DE_loss(s_user_emb, t_user_emb, expert)
-                item_DE_loss = compute_DE_loss(s_item_emb, t_item_emb, expert)
+                expert_idx = e % self.experts_num
+                user_expert = self.user_experts[expert_idx]
+                item_expert = self.item_experts[expert_idx]
+                user_DE_loss = compute_DE_loss(s_user_emb, t_user_emb, user_expert)
+                item_DE_loss = compute_DE_loss(s_item_emb, t_item_emb, item_expert)
 
                 # RRD loss
-                pred_t = t_pos_score - t_neg_score
-                pred_s = s_pos_score - s_neg_score
+                if len(batch["user"].shape) > 1:
+                    u = batch["user"].squeeze(1)
+                else:
+                    u = batch["user"]
+                pred_t = torch.index_select(t_score_mat, 0, u)
+                pred_s = student_model.get_score_mat(u)
                 RRD_loss = compute_RRD_loss(pred_t, pred_s, self.K)
 
                 # Base loss
-                base_loss = -torch.mean(torch.log(torch.sigmoid(s_pos_score - s_neg_score)))
+                base_loss = -torch.sum(torch.log(torch.sigmoid(s_pos_score - s_neg_score)))
 
                 total_loss = self.DE_lambda * (user_DE_loss + item_DE_loss) \
-                             + self.RRD_lambda * RRD_loss \
-                             + base_loss
+                                + self.RRD_lambda * RRD_loss \
+                                + base_loss
+                # total_loss = base_loss
                 total_loss.backward()
 
                 optimizer.step()
+                optimizer_base.step()
                 loss_sum += total_loss.item()
-            pbar.set_postfix({"loss": loss_sum})
-
+                base_loss_sum += base_loss.item()
+            pbar.set_postfix({"loss": loss_sum, "base_loss": base_loss_sum})
+    
+    def save_models(self, save_path):
+        torch.save(self.s_model.state_dict, os.path.join(save_path, "student.pt"))
+        torch.save(self.item_experts.state_dict, os.path.join(save_path, f"{self.experts_num}_item_experts.pt"))
+        torch.save(self.user_experts.state_dict, os.path.join(save_path, f"{self.experts_num}_user_experts.pt"))
 
 if __name__ == "__main__":
-    # init teacher models and student models
-
     # load data
-
+    print(f"loading dataset")
+    yelp_data = "original-CCD/dataset/Yelp/TASK_0.pickle"
+    with open(yelp_data, "rb") as f:
+        data = pickle.load(f)
+    save_path = "students"
+    model_name = "transformer"
+    if not os.path.exists(f"{save_path}/{model_name}"):
+        os.makedirs(f"{save_path}/{model_name}")
+    train_dataset = KDDataset(pickle_data=data, level='train')
+    dataloader = DataLoader(train_dataset, batch_size=2 ** 12, shuffle=True)
+    # init teacher model
+    teacher_embedding_dim = 8
+    student_embedding_dim = 4
+    user_num = train_dataset.get_user_num()
+    item_num = train_dataset.get_item_num()
+    teacher_model = TransformerSelf(num_users=user_num, 
+                            num_items=item_num, 
+                            embedding_dim=teacher_embedding_dim, 
+                            nhead=4, 
+                            num_layers=2)
+    ckpt = torch.load("teachers/transformer.pt")
+    teacher_model.load_state_dict(ckpt)
+    # init student model
+    student_model = TransformerSelf(num_users=user_num, 
+                            num_items=item_num, 
+                            embedding_dim=student_embedding_dim, 
+                            nhead=2, 
+                            num_layers=1)
     # KD
-
+    # instantiate kd
+    kd = KD(dataloader=dataloader,
+            experts_num=4,
+            experts_dims=[student_embedding_dim,teacher_embedding_dim*2,teacher_embedding_dim],
+            t_model=teacher_model,
+            s_model=student_model,
+            K=10)
+    # run kd
+    kd.train(epoch=1000)
     # save
-
+    kd.save_models(f"{save_path}/{model_name}")
     # end
-    pass
 
 

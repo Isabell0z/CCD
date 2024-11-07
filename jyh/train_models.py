@@ -11,7 +11,8 @@ from dataset import KDDataset
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-teachers_path = "teachers"
+save_path = "teachers"
+model_name = "transformer"
 # 加载数据集
 yelp_data = "original-CCD/dataset/Yelp/TASK_0.pickle"
 # csv_file = 'Data/user_item_pairs.csv'
@@ -23,36 +24,36 @@ print(f"loading dataset")
 with open(yelp_data, "rb") as f:
     data = pickle.load(f)
 train_dataset = KDDataset(pickle_data=data, level='train')
-dataloader = DataLoader(train_dataset, batch_size=1024, shuffle=True)
+dataloader = DataLoader(train_dataset, batch_size=2048, shuffle=True)
 
 # 示例参数
-embedding_dim = 8
+embedding_dim = 1024
 user_num = train_dataset.get_user_num()
 item_num = train_dataset.get_item_num()
 # 初始化模型和优化器
 model = TransformerSelf(num_users=user_num, num_items=item_num, embedding_dim=embedding_dim, nhead=4, num_layers=2)
 model.to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
 
 print(f"training")
 # 训练模型
 model.train()
-pbar = tqdm(range(100), desc="training epoch")
+pbar = tqdm(range(1000), desc="training epoch")
 for epoch in pbar:
     total_loss = 0
     for batch in dataloader:
         batch = {k: batch[k].to(device) for k in batch.keys()}
         optimizer.zero_grad()
 
-        pos_score, neg_score = model(batch)
-        loss = -torch.mean(torch.log(torch.sigmoid(pos_score - neg_score)))
+        pos_score, neg_score, item_emb, user_emb = model(batch)
+        loss = -torch.sum(torch.log(torch.sigmoid(pos_score - neg_score)))
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item()
     pbar.set_postfix({"loss": total_loss / len(dataloader)})
     # print(f'Epoch {epoch + 1}, Loss: {total_loss / len(dataloader)}')
-if not os.path.exists(teachers_path):
-    os.makedirs(teachers_path)
-torch.save(model.state_dict(), f"{teachers_path}/transformer.pt")
+if not os.path.exists(save_path):
+    os.makedirs(save_path)
+torch.save(model.state_dict(), f"{save_path}/{model_name}.pt")
 print("Training complete.")
