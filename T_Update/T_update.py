@@ -195,7 +195,7 @@ def main(args):
             train_loader = get_VAE_replay_learning_loader_integrate_with_R(replay_learning_dataset, p_R, p_total_user, max_item, args)
 
 
-    teacher_update(T=Teacher, mt= model_type, tl= train_loader, sc= scaler, a=args,
+    eval_args = teacher_update(T=Teacher, mt= model_type, tl= train_loader, sc= scaler, a=args,
                    ttd=total_train_dataset, tvd= total_valid_dataset, ttds= total_test_dataset,
                    Tsm= T_score_mat, Ssm= S_score_mat, Srm= S_rank_mat, Psm = P_score_mat, Prm= P_rank_mat,
                    CLsm= CL_score_mat, CLrm= CL_rank_mat, pR= p_R, ptu= p_total_user,
