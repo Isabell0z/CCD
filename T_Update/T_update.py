@@ -195,11 +195,12 @@ def main(args):
             train_loader = get_VAE_replay_learning_loader_integrate_with_R(replay_learning_dataset, p_R, p_total_user, max_item, args)
 
 
-    teacher_update(model_type, Teacher, train_loader, replay_learning_dataset,
-                    args, task_idx, gpu, p_R, p_total_user, max_item,
-                    total_train_dataset, total_valid_dataset, 
-                    total_test_dataset, new_user_train_mat, 
-                    new_user_valid_mat, new_user_test_mat, args.k_list)
+    teacher_update(T=Teacher, mt= model_type, tl= train_loader, sc= scaler, a=args,
+                   ttd=total_train_dataset, tvd= total_valid_dataset, ttds= total_test_dataset,
+                   Tsm= T_score_mat, Ssm= S_score_mat, Srm= S_rank_mat, Psm = P_score_mat, Prm= P_rank_mat,
+                   CLsm= CL_score_mat, CLrm= CL_rank_mat, pR= p_R, ptu= p_total_user,
+                   mi= max_item, ti= task_idx, nu_mt= new_user_train_mat, nu_vm= new_user_valid_mat,
+                   nu_tm= new_user_test_mat, g=gpu)
 # ################################### Stage3: Teacher update ##########################################################################################################################################################        
 
 #     if model_type in ["BPR", "LightGCN"]:

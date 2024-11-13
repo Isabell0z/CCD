@@ -55,11 +55,11 @@ from Utils.utils import *
     Returns:
         dict: A dictionary containing evaluation results and best model parameters.
 """
-def teacher_update(T, mt, tl, opt, crit, sc, a, ttd,
+def teacher_update(T, mt, tl, sc, a, ttd,
                     tvd, ttds, Tsm, Ssm, Srm, Psm,
                     Prm, CLsm, CLrm, pR, ptu, mi, ti,
                     nu_mt, nu_vm, nu_tm, g):
-    ## 1.教师模型训练
+    ## 1.z
 
     # 根据模型类型配置优化器参数和loss类型
     if mt == "BPR" or mt == "LightGCN":
