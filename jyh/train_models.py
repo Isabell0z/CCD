@@ -59,5 +59,8 @@ for epoch in pbar:
     # print(f'Epoch {epoch + 1}, Loss: {total_loss / len(dataloader)}')
 if not os.path.exists(save_path):
     os.makedirs(save_path)
-torch.save(model.state_dict(), f"{save_path}/{model_name}.pt")
+torch.save({"checkpoint": model.state_dict(),
+            "score_mat": model.get_score_mat(),
+            "sorted_mat": model.get_top_k(1000)[1]
+            }, f"{save_path}/{model_name}.pt")
 print("Training complete.")

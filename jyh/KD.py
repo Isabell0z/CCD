@@ -100,9 +100,11 @@ class KD:
             pbar.set_postfix({"loss": loss_sum, "base_loss": base_loss_sum})
     
     def save_models(self, save_path):
-        torch.save(self.s_model.state_dict(), os.path.join(save_path, "student.pt"))
-        torch.save(self.item_experts.state_dict(), os.path.join(save_path, f"{self.experts_num}_item_experts.pt"))
-        torch.save(self.user_experts.state_dict(), os.path.join(save_path, f"{self.experts_num}_user_experts.pt"))
+        torch.save({"checkpoint": self.s_model.state_dict(),
+                    "score_mat": self.s_model.get_score_mat(),
+                    "sorted_mat": self.s_model.get_topk(1000)[1]}, os.path.join(save_path, "task0_student.pth"))
+        torch.save(self.item_experts.state_dict(), os.path.join(save_path, f"{self.experts_num}_item_experts.pth"))
+        torch.save(self.user_experts.state_dict(), os.path.join(save_path, f"{self.experts_num}_user_experts.pth"))
 
 if __name__ == "__main__":
     # load data
@@ -126,15 +128,15 @@ if __name__ == "__main__":
                             embedding_dim=teacher_embedding_dim, 
                             nhead=4, 
                             num_layers=2)
-    ckpt = torch.load("teachers/transformer.pt")
-    teacher_model.load_state_dict(ckpt)
+    ckpt = torch.load("teachers/task0_transformer.pth")
+    teacher_model.load_state_dict(ckpt["checkpoint"])
     # init or load student model
     student_model = TransformerSelf(num_users=user_num, 
                             num_items=item_num, 
                             embedding_dim=student_embedding_dim, 
                             nhead=2, 
                             num_layers=2)
-    ckpt_s = torch.load(f"{students_path}/{model_name}/student.pt")
+    ckpt_s = torch.load(f"{students_path}/{model_name}/task0_student.pt")
     student_model.load_state_dict(ckpt_s)
     # load expert models
     experts = {"item_experts": torch.load(f"{students_path}/{model_name}/5_item_experts.pt"),
