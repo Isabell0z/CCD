@@ -136,14 +136,6 @@ def main(args):
     print(f"\n P proxy score matrix={P_score_mat}")
     print(f"\n S proxy={S_proxy}")
     print(f"\n S proxy score matrix={P_score_mat}")
-
-    #################### eval
-    # test the performance of current distillation student model, P proxy, S proxy
-
-    # use function get_CL_result 
-    
-    
-    #################### eval
     
 
 # step1 : Learning with new interactions
@@ -161,11 +153,6 @@ def main(args):
     Filter_Teacher_score_mat = filtering_simple(Teacher_score_mat,before_train_data).detach().cpu()
     T_top_items = torch.topk(Filter_Teacher_score_mat,k=40,dim=1).indices
     exclude_top_items = T_top_items.clone().detach()
-
-    get_CL_result(total_train_dataset, total_valid_dataset, total_test_dataset, Distill_sorted_mat, args.k_list,
-                  current_task_idx = args.num_task-1, FB_flag = False, return_value = False, max_task = current_task)
-    exclude_top_items = torch.cat([exclude_top_items, torch.tensor(Distill_sorted_mat[:, :40])], dim = 1)
-    del Distill_sorted_mat
 
     if before_task != 0:
         get_CL_result(total_train_dataset, total_valid_dataset, total_test_dataset, S_sorted_mat, args.k_list, 
@@ -235,6 +222,27 @@ def main(args):
         print(f"\n S_sigmoid_mat:{S_sigmoid_mat}")
         print(f"\n P_sigmoid_mat:{P_sigmoid_mat}")
 
+    #################### eval
+    print("\n[The Performance of Student]")
+
+    get_CL_result(total_train_dataset, total_valid_dataset, total_test_dataset, Distill_sorted_mat, args.k_list,
+                      current_task_idx=args.num_task - 1, FB_flag=False, return_value=False, max_task=current_task)
+
+    exclude_top_items = torch.cat([exclude_top_items, torch.tensor(Distill_sorted_mat[:, :40])], dim=1)
+    del Distill_sorted_mat
+
+    print("\n[S_proxy Performance]")
+    get_CL_result(total_train_dataset, total_valid_dataset, total_test_dataset, S_sorted_mat, args.k_list,
+                      current_task_idx=args.num_task - 1, FB_flag=False, return_value=False, max_task=current_task)
+    exclude_top_items = torch.cat([exclude_top_items, torch.tensor(S_sorted_mat[:, :40])], dim=1)
+    del S_sorted_mat
+
+    print("\n[P_proxy Performance]")
+    get_CL_result(total_train_dataset, total_valid_dataset, total_test_dataset, P_sorted_mat, args.k_list,
+                      current_task_idx=args.num_task - 1, FB_flag=False, return_value=False, max_task=current_task)
+    exclude_top_items = torch.cat([exclude_top_items, torch.tensor(P_sorted_mat[:, :40])], dim=1)
+    del P_sorted_mat
+    #################### eval
 
 # step3 : train model (replay learning)  and the overall objective for student update
 
@@ -246,6 +254,8 @@ def main(args):
     optimizer = optim.Adam(S_model.parameters(), lr=args.lr, weight_decay=args.reg)
     criterion = nn.BCEWithLogitsLoss(reduction='sum')
     total_time = 0.0
+    eval_args = {"best_score": 0, "test_score": 0, "best_epoch": 0, "best_model": None,
+                 "score_mat": None, "sorted_mat": None, "patience": 0, "avg_valid_score": 0, "avg_test_score": 0}
 
     # train model
     for epoch in range(args.max_epoch):
@@ -328,19 +338,79 @@ def main(args):
             total_time += epoch_time
             print(f"epoch_time = {epoch_time:.4f} seconds, total_time = {total_time:.4f} seconds")
 
-            #################### eval
-            # evaluation model 
-
-
-            # save best model
-
-
+        # evaluation model 
+        print("\n[Evaluating]")
+        S_model.eval()
+        with torch.no_grad():
+            CL_score_mat, CL_sorted_mat = get_sorted_score_mat(S_model, return_sorted_mat = True)
 
             #################### eval
+            valid_list, test_list = get_CL_result(total_train_dataset, total_valid_dataset, total_test_dataset,
+                                                  CL_sorted_mat, args.k_list, current_task_idx=current_task, FB_flag=False,
+                                                  return_value=True)
+            avg_valid_score = get_average_score(valid_list, "valid_R20")
+            avg_test_score = get_average_score(test_list, "test_R20")
+
+            if args.eval_average_acc:
+                valid_score = avg_valid_score
+                test_score =  avg_test_score
+            else:
+                valid_score = valid_list[current_task]["valid_R20"]
+                test_score = test_list[current_task]["test_R20"]
+
+            # New users
+            print(f"\t[The Result of new users in {current_task}-th Block]")
+            new_user_results = get_eval_with_mat(new_user_train, new_user_valid, new_user_test,
+                                                     CL_sorted_mat, args.k_list)
+            new_user_results_txt = f"valid_R20 = {new_user_results['valid']['R20']}, test_R20 = {new_user_results['test']['R20']}"
+            print(f"\t{new_user_results_txt}\n")
+
+            if valid_score > eval_args["best_score"]:
+                print(f"\t[Best Model Changed]\n\tvalid_score = {valid_score:.4f}, test_score = {test_score:.4f}")
+                eval_args["best_score"] = valid_score
+                eval_args["test_score"] = test_score
+                eval_args["avg_valid_score"] = avg_valid_score
+                eval_args["avg_test_score"] = avg_test_score
+                eval_args["best_epoch"] = epoch
+
+                eval_args["best_model"] = deepcopy(
+                    {k: v.cpu() for k, v in S_model.state_dict().items()})  # deepcopy(model) # model.state_dict()
+                eval_args["score_mat"] = deepcopy(CL_score_mat)
+                eval_args["sorted_mat"] = deepcopy(CL_sorted_mat)
+                eval_args["patience"] = 0
+                best_new_user_results = deepcopy(new_user_results_txt)
+            else:
+                eval_args["patience"] += 1
+                if eval_args["patience"] >= args.early_stop:
+                    print("[Early Stopping]")
+                    break
+
+            #################### eval
+
+        if args.replay_learning and epoch > 0:
+            replay_learning_data = get_total_replay_learning_dataset(Distill_score_mat, S_rank_mat, S_sigmoid_mat, P_rank_mat, P_sigmoid_mat, args)
+
+        # Get gpu memory
+        #gc.collect()
+        #torch.cuda.empty_cache()
+        # save best model
+
+    #################### eval
+    print(f"\n[Final result of student's update in the {current_task}-th data block]")
+    print(f"\tbest_epoch = {eval_args['best_epoch']}, valid_score = {eval_args['best_score']}, test_score = {eval_args['test_score']}",end=" ")
+    print(f"avg_valid_score = {eval_args['avg_valid_score']}, avg_test_score = {eval_args['avg_test_score']}")
+
+    get_CL_result(total_train_dataset, total_valid_dataset, total_test_dataset, eval_args["sorted_mat"], args.k_list,
+                  current_task_idx=args.num_task, FB_flag=False, return_value=False)
+
+    print(f"\t[The Result of new users in {current_task}-th Block]")
+    print(f"\t{best_new_user_results}\n")
+
+    #################### eval
 
     # save model
     if args.save:
-        print("\n save P,S proxy")
+        print("\n save Student model, P, S proxy")
 
         if args.save_path is not None:
             save_path = args.save_path
@@ -349,6 +419,7 @@ def main(args):
 
         save_S_proxy_dir_path = f"{save_path}/Stability"
         save_P_proxy_dir_path = f"{save_path}/Plasticity"
+        save_CL_model_dir_path = f"{save_path}/CL"
 
         for dir_path in [save_S_proxy_dir_path, save_P_proxy_dir_path]:
             if not os.path.exists(dir_path):
@@ -356,10 +427,12 @@ def main(args):
 
         save_model(save_S_proxy_dir_path, before_task,{"best_model": deepcopy({k: v.cpu() for k, v in S_proxy.state_dict().items()}),"score_mat": Filter_S_score_mat})
         save_model(save_P_proxy_dir_path, before_task,{"best_model": deepcopy({k: v.cpu() for k, v in P_proxy.state_dict().items()}),"score_mat": Filter_P_score_mat})
-        
+        save_model(save_CL_model_dir_path, current_task,{"best_model": eval_args["best_model"], "score_mat": eval_args["score_mat"]})
+
         print("save_S_proxy_dir_path", save_S_proxy_dir_path)
         print("save_P_proxy_dir_path", save_P_proxy_dir_path)
-        
+        print("save_CL_model_dir_path", save_CL_model_dir_path)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
