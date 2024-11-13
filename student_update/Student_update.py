@@ -230,18 +230,18 @@ def main(args):
 
     exclude_top_items = torch.cat([exclude_top_items, torch.tensor(Distill_sorted_mat[:, :40])], dim=1)
     del Distill_sorted_mat
-
-    print("\n[S_proxy Performance]")
-    get_CL_result(total_train_dataset, total_valid_dataset, total_test_dataset, S_sorted_mat, args.k_list,
+    if before_task != 0:
+        print("\n[S_proxy Performance]")
+        get_CL_result(total_train_dataset, total_valid_dataset, total_test_dataset, S_sorted_mat, args.k_list,
                       current_task_idx=args.num_task - 1, FB_flag=False, return_value=False, max_task=current_task)
-    exclude_top_items = torch.cat([exclude_top_items, torch.tensor(S_sorted_mat[:, :40])], dim=1)
-    del S_sorted_mat
+        exclude_top_items = torch.cat([exclude_top_items, torch.tensor(S_sorted_mat[:, :40])], dim=1)
+        del S_sorted_mat
 
-    print("\n[P_proxy Performance]")
-    get_CL_result(total_train_dataset, total_valid_dataset, total_test_dataset, P_sorted_mat, args.k_list,
+        print("\n[P_proxy Performance]")
+        get_CL_result(total_train_dataset, total_valid_dataset, total_test_dataset, P_sorted_mat, args.k_list,
                       current_task_idx=args.num_task - 1, FB_flag=False, return_value=False, max_task=current_task)
-    exclude_top_items = torch.cat([exclude_top_items, torch.tensor(P_sorted_mat[:, :40])], dim=1)
-    del P_sorted_mat
+        exclude_top_items = torch.cat([exclude_top_items, torch.tensor(P_sorted_mat[:, :40])], dim=1)
+        del P_sorted_mat
     #################### eval
 
 # step3 : train model (replay learning)  and the overall objective for student update
@@ -410,7 +410,7 @@ def main(args):
 
     # save model
     if args.save:
-        print("\n save Student model, P, S proxy")
+        print("\n save Student model, P,S proxy")
 
         if args.save_path is not None:
             save_path = args.save_path
