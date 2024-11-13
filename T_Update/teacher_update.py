@@ -59,9 +59,9 @@ def teacher_update(T, mt, tl, sc, a, ttd,
                     tvd, ttds, Tsm, Ssm, Srm, Psm,
                     Prm, CLsm, CLrm, pR, ptu, mi, ti,
                     nu_mt, nu_vm, nu_tm, g):
-    ## 1.z
+    ## 1.Teacher模型更新
 
-    # 根据模型类型配置优化器参数和loss类型
+    #根据模型类型配置优化器参数和loss类型
     if mt == "BPR" or mt == "LightGCN":
         # 对于BPR或LightGCN，将模型参数和聚类参数包装在一起
         p = [{"params": T.parameters()}, {"params": T.cluster}]
@@ -86,7 +86,8 @@ def teacher_update(T, mt, tl, sc, a, ttd,
     for e in range(a.max_epoch):
         print("\n[Epoch:" + str(e + 1) + "/" + str(a.max_epoch) + "]")
         # 初始化每种loss类型的累计值
-        el = {f"epoch_{l}_loss": 0.0 for l in lt}
+        for l in lt:
+            el = {f"epoch_{l}_loss": 0.0}
         erl = 0.0
         st = time.time()
         # 负采样
@@ -96,15 +97,14 @@ def teacher_update(T, mt, tl, sc, a, ttd,
         for mb in tl:
             # 正向传播计算loss
             if mt == "BPR" or mt == "LightGCN":
-                bl, ul, il, uul, iil, cl = T(mb)
-                bl = bl + a.LWCKD_lambda * (ul + il + uul + iil) + (a.cluster_lambda * cl)
-            else:
+                base_loss, UI_loss, IU_loss, UU_loss, II_loss, cluster_loss = T(mb)
+                batch_loss = base_loss + a.LWCKD_lambda * (UI_loss + IU_loss + UU_loss + II_loss) + (a.cluster_lambda * cluster_loss)
                 if mt == "VAE":
-                    bl, kl = T(mb)
-                    bl = bl + a.kl_lambda * kl
+                    base_loss, kl_loss = T(mb)
+                    batch_loss = base_loss + a.kl_lambda * kl_loss
             # 反向传播和优化
             opt.zero_grad()
-            sc.scale(bl).backward()
+            sc.scale(batch_loss).backward()
             sc.step(opt)
             sc.update()
             # 更新loss
@@ -123,9 +123,9 @@ def teacher_update(T, mt, tl, sc, a, ttd,
             # 判断是否使用退火技术来调整回放学习的权重
             if a.annealing:
                 # 使用指数退火调整lambda，随着时间的推移逐渐减少回放学习的影响
-                rll = a.replay_learning_lambda * torch.exp(torch.tensor(-e) / a.T)
+                replay_learning_lambda = a.replay_learning_lambda * torch.exp(torch.tensor(-e) / a.T)
             else:
-                rll = a.replay_learning_lambda
+                replay_learning_lambda = a.replay_learning_lambda
             
             # 打乱回放学习数据集
             sl = random.sample(replay_learning_dataset, len(replay_learning_dataset))
@@ -144,7 +144,7 @@ def teacher_update(T, mt, tl, sc, a, ttd,
                 # 将用户、项目和评分转换为tensor
                 bu = torch.tensor(ul[s:en], dtype=torch.long).to(g)
                 bi = torch.tensor(il[s:en], dtype=torch.long).to(g)
-                bl = torch.tensor(rl[s:en], dtype=torch.float16).to(g)
+                batch_label = torch.tensor(rl[s:en], dtype=torch.float16).to(g)
 
                 # 获取用户和项目的embedding
                 ue, ie = T.base_model.get_embedding()
@@ -153,18 +153,18 @@ def teacher_update(T, mt, tl, sc, a, ttd,
 
                 # 计算loss
                 o = (bue * bie).sum(1)
-                bl = crit(o, bl)
-                bl *= rll
+                batch_loss = crit(o, batch_label)
+                batch_loss *= replay_learning_lambda
 
                 # 反向传播和优化
                 opt.zero_grad()
-                sc.scale(bl).backward()
+                sc.scale(batch_loss).backward()
                 sc.step(opt)
                 sc.update()
-                erl += bl.item()
+                erl += batch_loss.item()
 
             rlt = time.time()
-            print("epoch_replay_learning_loss = " + str(round(erl / it, 4)) + ", replay_learning_lambda = " + str(round(rll.item(), 5)) + ", replay_learning_time = " + str(round(rlt - cft, 4)) + " seconds", end=" ")
+            print("epoch_replay_learning_loss = " + str(round(erl / it, 4)) + ", replay_learning_lambda = " + str(round(replay_learning_lambda.item(), 5)) + ", replay_learning_time = " + str(round(rlt - cft, 4)) + " seconds", end=" ")
 
         et = time.time()
         etime = et - st
@@ -248,3 +248,49 @@ def teacher_update(T, mt, tl, sc, a, ttd,
     print("\t" + bnur + "\n")
 
     return ea
+
+
+    '''
+    # if mt in ["BPR", "LightGCN"]:
+    #     param = [{"params" : T.parameters()}, {"params" : T.cluster}]
+    #     loss_type = ["base", "UI", "IU", "UU", "II", "cluster"]
+    # elif mt == "VAE":
+    #     param = T.parameters()
+    #     loss_type = ["base", "kl"]
+    # opt = optim.Adam(param, lr=a.lr, weight_decay=a.reg)
+    # crit = nn.BCEWithLogitsLoss(reduction='sum')
+    # ea = {"best_score": 0, "test_score": 0, "best_epoch": 0, "best_model": None, "score_mat": None, "sorted_mat": None, "patience": 0, "avg_valid_score": 0, "avg_test_score": 0}
+    # tt = 0
+    # gc.collect()
+    # torch.cuda.empty_cache()
+    # for epoch in range(a.max_epoch):
+    #     print(f"\n[Epoch:{epoch + 1}/{a.max_epoch}]")
+    #     epoch_loss = {f"epoch_{l}_loss": 0.0 for l in loss_type}
+    #     epoch_replay_learning_loss = 0.0
+    #     start_time = time.time()
+    #     tl.dataset.negative_sampling()
+
+    #     T.train()
+    #     for mini_batch in tl:
+    #         if mt in ["BPR", "LightGCN"]:
+    #             base_loss, UI_loss, IU_loss, UU_loss, II_loss, cluster_loss = T(mini_batch)
+    #             batch_loss = base_loss + a.LWCKD_lambda * (UI_loss + IU_loss + UU_loss + II_loss) + (a.cluster_lambda * cluster_loss)
+
+    #         elif mt == "VAE":
+    #             base_loss, kl_loss = T(mini_batch)
+    #             batch_loss = base_loss + a.kl_lambda * kl_loss
+
+    #         opt.zero_grad()
+    #         sc.scale(batch_loss).backward()
+    #         sc.step(opt)
+    #         sc.update()
+    #         for l in loss_type:
+    #             epoch_loss[f"epoch_{l}_loss"] += eval(f"{l}_loss").item()
+
+    #     for l in loss_type:
+    #         loss_name = f"epoch_{l}_loss"
+    #         epoch_loss[loss_name] = round(epoch_loss[loss_name] / len(tl), 4)
+             
+    #         CF_time = time.time()
+    #         print(f"{epoch_loss}, CF_time = {CF_time - start_time:.4f} seconds", end = " ")
+    '''
