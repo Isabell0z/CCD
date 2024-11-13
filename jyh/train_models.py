@@ -6,13 +6,13 @@ import pandas as pd
 import numpy as np
 import random
 from tqdm import tqdm
-from models import TransformerSelf
+from models import TransformerSelf, GCNSelf, VAESelf, MFSelf
 from dataset import KDDataset
 
-
+model_names = ["tranformer", "GCN", "VAE", "MF"]
 device = "cuda" if torch.cuda.is_available() else "cpu"
 save_path = "teachers"
-model_name = "transformer"
+model_name = model_names[3]
 # 加载数据集
 yelp_data = "original-CCD/dataset/Yelp/TASK_0.pickle"
 # csv_file = 'Data/user_item_pairs.csv'
@@ -31,9 +31,13 @@ embedding_dim = 1024
 user_num = train_dataset.get_user_num()
 item_num = train_dataset.get_item_num()
 # 初始化模型和优化器
-model = TransformerSelf(num_users=user_num, num_items=item_num, embedding_dim=embedding_dim, nhead=4, num_layers=2)
+# model = TransformerSelf(num_users=user_num, num_items=item_num, embedding_dim=embedding_dim, nhead=4, num_layers=2)
+# model = GCNSelf(num_users=user_num, num_items=item_num, hidden_channels=embedding_dim)
+model = MFSelf(num_users=user_num, num_items=item_num, embedding_dim=embedding_dim)
+# model = VAESelf(num_users=user_num, num_items=item_num, embedding_dim=embedding_dim)
+
 model.to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 print(f"training")
 # 训练模型
