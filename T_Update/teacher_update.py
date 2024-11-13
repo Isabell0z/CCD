@@ -111,10 +111,10 @@ def teacher_update(T, mt, tl, sc, a, ttd,
             sc.update()
             # 更新loss
             for l in lt:
-                el["epoch_" + l + "_loss"] += eval(l + "_loss").item()
+                el[f"epoch)_{l}_loss"] += eval(f"{l}_loss").item()
 
         for l in lt:
-            ln = "epoch_" + l + "_loss"
+            ln = f"epoch_{l}_loss"
             el[ln] = round(el[ln] / len(tl), 4)
 
         cft = time.time()
