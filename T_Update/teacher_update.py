@@ -86,9 +86,7 @@ def teacher_update(T, mt, tl, sc, a, ttd,
     for e in range(a.max_epoch):
         print("\n[Epoch:" + str(e + 1) + "/" + str(a.max_epoch) + "]")
         # 初始化每种loss类型的累计值
-        el = {}
-        for l in lt:
-            el["epoch_" + l + "_loss"] = 0.0
+        el = {f"epoch_{l}_loss": 0.0 for l in lt}
         erl = 0.0
         st = time.time()
         # 负采样
@@ -111,7 +109,7 @@ def teacher_update(T, mt, tl, sc, a, ttd,
             sc.update()
             # 更新loss
             for l in lt:
-                el[f"epoch)_{l}_loss"] += eval(f"{l}_loss").item()
+                el[f"epoch_{l}_loss"] += eval(f"{l}_loss").item()
 
         for l in lt:
             ln = f"epoch_{l}_loss"
