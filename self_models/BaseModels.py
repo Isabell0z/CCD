@@ -7,6 +7,8 @@ from torch_geometric.nn import GCNConv
 class ModelSelf(nn.Module):
     def __init__(self, num_users, num_items, embedding_dim):
         super(ModelSelf, self).__init__()
+        self.user_count = num_users
+        self.item_count = num_items
         self.user_emb = nn.Embedding(num_users, embedding_dim)
         self.item_emb = nn.Embedding(num_items, embedding_dim)
 
@@ -50,6 +52,9 @@ class ModelSelf(nn.Module):
             topk = torch.topk(torch.index_select(score_mat, 0, user), K, dim=1)
         return topk
 
+    def get_loss(self, pos_score, neg_score):
+        return -torch.sum(torch.log(torch.sigmoid(pos_score - neg_score)))
+
 
 class TransformerSelf(ModelSelf):
     def __init__(self, num_users, num_items, embedding_dim, nhead, num_layers):
@@ -76,13 +81,9 @@ class TransformerSelf(ModelSelf):
         neg_item = mini_batch["neg_item"]
 
         # 获取用户和物品的嵌入
-        u = self.user_emb(user)  # .unsqueeze(1)  # (batch_size, 1, embedding_dim)
-        pos_emb = self.item_emb(
-            pos_item
-        )  # .unsqueeze(1)  # (batch_size, 1, embedding_dim)
-        neg_emb = self.item_emb(
-            neg_item
-        )  # .unsqueeze(1)  # (batch_size, 1, embedding_dim)
+        u = self.user_emb(user).unsqueeze(1)  # (batch_size, 1, embedding_dim)
+        pos_emb = self.item_emb(pos_item).unsqueeze(1)  # (batch_size, 1, embedding_dim)
+        neg_emb = self.item_emb(neg_item).unsqueeze(1)  # (batch_size, 1, embedding_dim)
 
         # 合并嵌入
         pos_input = torch.cat([u, pos_emb], dim=1)  # (batch_size, 2, embedding_dim)
@@ -101,9 +102,6 @@ class TransformerSelf(ModelSelf):
         neg_score = self.fc(neg_output[:, -1, :])  # (batch_size, 1)
 
         return pos_score, neg_score, torch.cat((pos_emb, neg_emb), dim=-1), u
-
-    def get_loss(self, pos_score, neg_score):
-        return -torch.sum(torch.log(torch.sigmoid(pos_score - neg_score)))
 
 
 class GCNSelf(ModelSelf):

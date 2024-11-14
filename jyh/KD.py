@@ -9,14 +9,28 @@ from DE import Expert, compute_DE_loss
 from RRD import compute_RRD_loss
 from dataset import KDDataset
 from models import TransformerSelf
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
+
 class KD:
-    def __init__(self, dataloader, experts_num, experts_dims, t_model, s_model:nn.Module, K, experts=None, DE_lambda=0.001, RRD_lambda=0.0001,
-                 device='cuda'):
+    def __init__(
+        self,
+        dataloader,
+        experts_num,
+        experts_dims,
+        t_model,
+        s_model: nn.Module,
+        K,
+        experts=None,
+        DE_lambda=0.001,
+        RRD_lambda=0.0001,
+        device="cuda",
+    ):
         """_summary_
 
         Args:
-            dataloader (Dataloader): 
+            dataloader (Dataloader):
             experts_num (int): number of experts
             experts_dims (list): [in, hidden, out];
                     in=student_embedding_size, out=teacher_embedding_size
@@ -31,16 +45,20 @@ class KD:
         self.experts_num = experts_num
         self.t_model = t_model.to(device)
         self.s_model = s_model.to(device)
-        
-        self.user_experts = nn.ModuleList([Expert(experts_dims[0], 
-                                                  experts_dims[1], 
-                                                  experts_dims[2])
-                                           for _ in range(self.experts_num)])
+
+        self.user_experts = nn.ModuleList(
+            [
+                Expert(experts_dims[0], experts_dims[1], experts_dims[2])
+                for _ in range(self.experts_num)
+            ]
+        )
         # pos + neg -> size*2
-        self.item_experts = nn.ModuleList([Expert(experts_dims[0]*2, 
-                                                  experts_dims[1]*2, 
-                                                  experts_dims[2]*2)
-                                           for _ in range(self.experts_num)])
+        self.item_experts = nn.ModuleList(
+            [
+                Expert(experts_dims[0] * 2, experts_dims[1] * 2, experts_dims[2] * 2)
+                for _ in range(self.experts_num)
+            ]
+        )
         if experts is not None:
             self.user_experts.load_state_dict(experts["user_experts"])
             self.item_experts.load_state_dict(experts["item_experts"])
@@ -53,8 +71,13 @@ class KD:
     def train(self, epoch):
         self.t_model.eval()
         self.s_model.train()
-        optimizer = torch.optim.Adam([{"params": self.user_experts.parameters()}, {"params": self.item_experts.parameters()}],
-                                     lr=0.01)
+        optimizer = torch.optim.Adam(
+            [
+                {"params": self.user_experts.parameters()},
+                {"params": self.item_experts.parameters()},
+            ],
+            lr=0.01,
+        )
         optimizer_base = torch.optim.Adam(self.s_model.parameters(), lr=0.0005)
         pbar = tqdm(range(epoch), desc="Training")
         t_score_mat = self.t_model.get_score_mat()
@@ -64,7 +87,7 @@ class KD:
             for i, batch in enumerate(self.dataloader):
                 optimizer.zero_grad()
                 optimizer_base.zero_grad()
-                batch = {k:batch[k].to(device) for k in batch.keys()}
+                batch = {k: batch[k].to(device) for k in batch.keys()}
                 with torch.no_grad():
                     t_item_emb, t_user_emb = self.t_model.get_embedding(batch)
                 s_pos_score, s_neg_score, s_item_emb, s_user_emb = self.s_model(batch)
@@ -85,11 +108,15 @@ class KD:
                 RRD_loss = compute_RRD_loss(pred_t, pred_s, self.K)
 
                 # Base loss
-                base_loss = -torch.sum(torch.log(torch.sigmoid(s_pos_score - s_neg_score)))
+                base_loss = -torch.sum(
+                    torch.log(torch.sigmoid(s_pos_score - s_neg_score))
+                )
 
-                total_loss = self.DE_lambda * (user_DE_loss + item_DE_loss) \
-                                + self.RRD_lambda * RRD_loss \
-                                + base_loss
+                total_loss = (
+                    self.DE_lambda * (user_DE_loss + item_DE_loss)
+                    + self.RRD_lambda * RRD_loss
+                    + base_loss
+                )
                 # total_loss = base_loss
                 total_loss.backward()
 
@@ -98,13 +125,25 @@ class KD:
                 loss_sum += total_loss.item()
                 base_loss_sum += base_loss.item()
             pbar.set_postfix({"loss": loss_sum, "base_loss": base_loss_sum})
-    
+
     def save_models(self, save_path):
-        torch.save({"checkpoint": self.s_model.state_dict(),
-                    "score_mat": self.s_model.get_score_mat(),
-                    "sorted_mat": self.s_model.get_topk(1000)[1]}, os.path.join(save_path, "task0_student.pth"))
-        torch.save(self.item_experts.state_dict(), os.path.join(save_path, f"{self.experts_num}_item_experts.pth"))
-        torch.save(self.user_experts.state_dict(), os.path.join(save_path, f"{self.experts_num}_user_experts.pth"))
+        torch.save(
+            {
+                "checkpoint": self.s_model.state_dict(),
+                "score_mat": self.s_model.get_score_mat(),
+                "sorted_mat": self.s_model.get_topk(1000)[1],
+            },
+            os.path.join(save_path, "task0_student.pth"),
+        )
+        torch.save(
+            self.item_experts.state_dict(),
+            os.path.join(save_path, f"{self.experts_num}_item_experts.pth"),
+        )
+        torch.save(
+            self.user_experts.state_dict(),
+            os.path.join(save_path, f"{self.experts_num}_user_experts.pth"),
+        )
+
 
 if __name__ == "__main__":
     # load data
@@ -116,45 +155,55 @@ if __name__ == "__main__":
     model_name = "transformer"
     if not os.path.exists(f"{students_path}/{model_name}"):
         os.makedirs(f"{students_path}/{model_name}")
-    train_dataset = KDDataset(pickle_data=data, level='train')
-    dataloader = DataLoader(train_dataset, batch_size=2 ** 12, shuffle=True)
+    train_dataset = KDDataset(pickle_data=data, level="train")
+    dataloader = DataLoader(train_dataset, batch_size=2**12, shuffle=True)
     # init teacher model
     teacher_embedding_dim = 1024
     student_embedding_dim = 128
     user_num = train_dataset.get_user_num()
     item_num = train_dataset.get_item_num()
-    teacher_model = TransformerSelf(num_users=user_num, 
-                            num_items=item_num, 
-                            embedding_dim=teacher_embedding_dim, 
-                            nhead=4, 
-                            num_layers=2)
+    teacher_model = TransformerSelf(
+        num_users=user_num,
+        num_items=item_num,
+        embedding_dim=teacher_embedding_dim,
+        nhead=4,
+        num_layers=2,
+    )
     ckpt = torch.load("teachers/task0_transformer.pth")
     teacher_model.load_state_dict(ckpt["checkpoint"])
     # init or load student model
-    student_model = TransformerSelf(num_users=user_num, 
-                            num_items=item_num, 
-                            embedding_dim=student_embedding_dim, 
-                            nhead=2, 
-                            num_layers=2)
+    student_model = TransformerSelf(
+        num_users=user_num,
+        num_items=item_num,
+        embedding_dim=student_embedding_dim,
+        nhead=2,
+        num_layers=2,
+    )
     ckpt_s = torch.load(f"{students_path}/{model_name}/task0_student.pt")
     student_model.load_state_dict(ckpt_s)
     # load expert models
-    experts = {"item_experts": torch.load(f"{students_path}/{model_name}/5_item_experts.pt"),
-               "user_experts": torch.load(f"{students_path}/{model_name}/5_user_experts.pt")}
+    experts = {
+        "item_experts": torch.load(f"{students_path}/{model_name}/5_item_experts.pt"),
+        "user_experts": torch.load(f"{students_path}/{model_name}/5_user_experts.pt"),
+    }
     experts = None
     # KD
     # instantiate kd
-    kd = KD(dataloader=dataloader,
-            experts_num=5,
-            experts_dims=[student_embedding_dim,teacher_embedding_dim*2,teacher_embedding_dim],
-            t_model=teacher_model,
-            s_model=student_model,
-            K=10,
-            experts=experts)
+    kd = KD(
+        dataloader=dataloader,
+        experts_num=5,
+        experts_dims=[
+            student_embedding_dim,
+            teacher_embedding_dim * 2,
+            teacher_embedding_dim,
+        ],
+        t_model=teacher_model,
+        s_model=student_model,
+        K=10,
+        experts=experts,
+    )
     # run kd
-    kd.train(epoch=100)
+    kd.train(epoch=10)
     # save
     kd.save_models(f"{students_path}/{model_name}")
     # end
-
-
