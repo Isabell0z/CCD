@@ -66,11 +66,10 @@ def teacher_update(T, mt, tl, sc, a, ttd,
         # 对于BPR或LightGCN，将模型参数和聚类参数包装在一起
         p = [{"params": T.parameters()}, {"params": T.cluster}]
         lt = ["base", "UI", "IU", "UU", "II", "cluster"]
-    else:
-        if mt == "VAE":
-            # 对于VAE，只需要模型的主要参数
-            p = T.parameters()
-            lt = ["base", "kl"]
+    elif mt == "VAE":
+        # 对于VAE，只需要模型的主要参数
+        p = T.parameters()
+        lt = ["base", "kl"]
 
     # 初始化Adam优化器
     opt = optim.Adam(p, lr=a.lr, weight_decay=a.reg)
@@ -86,8 +85,7 @@ def teacher_update(T, mt, tl, sc, a, ttd,
     for e in range(a.max_epoch):
         print("\n[Epoch:" + str(e + 1) + "/" + str(a.max_epoch) + "]")
         # 初始化每种loss类型的累计值
-        for l in lt:
-            el = {f"epoch_{l}_loss": 0.0}
+        el = {f"epoch_{l}_loss": 0.0 for l in lt}
         erl = 0.0
         st = time.time()
         # 负采样
