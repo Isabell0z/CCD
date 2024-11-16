@@ -173,7 +173,7 @@ class PIW_LWCKD(nn.Module):
         # CF
         mini_batch = {key: values.to(self.gpu) for key, values in mini_batch.items()}
         output = self.base_model.forward(mini_batch)
-        base_loss = self.base_model.get_loss(output)
+        base_loss = self.base_model.get_loss(output[0], output[1])
 
         # LWCKD + PIW
         batch_user = mini_batch["user"].cpu()
@@ -187,8 +187,8 @@ class PIW_LWCKD(nn.Module):
 
         # LWCKD + PIW
         if self.LWCKD_flag:
-            if self.model_type == "BPR":
-                user_emb, item_emb = self.base_model.get_embedding()
+            if self.model_type in ["TransformerSelf"]:
+                user_emb, item_emb = self.base_model.get_embedding_weights()
                 UI_loss, IU_loss, UU_loss, II_loss, cluster_loss = self.LWCKD_PIW(
                     batch_user,
                     batch_pos_item,
@@ -200,7 +200,9 @@ class PIW_LWCKD(nn.Module):
                 )
 
             elif self.model_type == "LightGCN":
-                user_embs, item_embs = self.base_model.get_embedding(return_all=True)
+                user_embs, item_embs = self.base_model.get_embedding_weights(
+                    return_all=True
+                )
 
                 for i in range(self.num_layer):
                     layer_losses = self.LWCKD_PIW(
@@ -265,6 +267,7 @@ class PIW_LWCKD(nn.Module):
         IU_loss = self.LWCKD(
             batch_before_item_emb, present_common_user_emb, batch_item_rating_mat
         )
+        # ipdb.set_trace()
         UU_loss = self.LWCKD(batch_before_user_emb, present_common_user_emb, batch_UU)
         II_loss = self.LWCKD(batch_before_item_emb, present_common_item_emb, batch_II)
 
@@ -296,12 +299,13 @@ class PIW_LWCKD(nn.Module):
     def LWCKD(self, target_emb, neighbor_emb, rating_mat):
 
         exp = torch.exp(
-            target_emb @ neighbor_emb.t() / (self.temperature)
+            target_emb @ neighbor_emb.t() / (self.temperature + 1)
         )  # We recommend you to increase the temperature > 1 if "nan" occurs.
-        log = torch.log(exp / exp.sum(dim=1, keepdim=True))
+        # ipdb.set_trace()
+        log = torch.log(exp / (exp.sum(dim=1, keepdim=True) + 1e-3))
         loss = torch.divide(
-            torch.sum(log * rating_mat, dim=1), torch.sum(rating_mat, dim=1) + 1e-8
-        )  # interaction이 있는 애들만 고려.
+            torch.sum(log * rating_mat, dim=1), torch.sum(rating_mat, dim=1) + 1e-3
+        )
 
         # DEBUG
         nan_flag = False
@@ -443,7 +447,7 @@ class PIW_LWCKD(nn.Module):
         self.II = II
 
         # saving the before embedding
-        if self.model_type == "BPR":
+        if self.model_type in ["TransformerSelf"]:
             self.before_user_emb = self.base_model.user_emb.weight[
                 before_user_ids
             ].detach()
@@ -487,7 +491,7 @@ class PIW_LWCKD(nn.Module):
             self.v = len(present_item_ids) - 1
 
             # Random initalization
-            if self.model_type == "BPR":
+            if self.model_type in ["TransformerSelf"]:
                 cluster_id = present_item_ids[
                     random.sample(range(len(present_item_ids)), self.num_cluster)
                 ]

@@ -86,11 +86,11 @@ def teacher_update(
     ## 1.Teacher模型更新
 
     # 根据模型类型配置优化器参数和loss类型
-    if mt == "BPR" or mt == "LightGCN":
+    if mt not in ["TransformerSelf"]:
         # 对于BPR或LightGCN，将模型参数和聚类参数包装在一起
         p = [{"params": T.parameters()}, {"params": T.cluster}]
         lt = ["base", "UI", "IU", "UU", "II", "cluster"]
-    elif mt == "VAE":
+    else:
         # 对于VAE，只需要模型的主要参数
         p = T.parameters()
         lt = ["base", "kl"]
@@ -128,14 +128,15 @@ def teacher_update(
         T.train()
         for mb in tl:
             # 正向传播计算loss
-            if mt == "BPR" or mt == "LightGCN":
+            if mt not in ["TransformerSelf"]:
+                # ipdb.set_trace()
                 base_loss, UI_loss, IU_loss, UU_loss, II_loss, cluster_loss = T(mb)
                 batch_loss = (
                     base_loss
                     + a.LWCKD_lambda * (UI_loss + IU_loss + UU_loss + II_loss)
                     + (a.cluster_lambda * cluster_loss)
                 )
-            if mt == "VAE":
+            else:
                 base_loss, kl_loss = T(mb)
                 batch_loss = base_loss + a.kl_lambda * kl_loss
             # 反向传播和优化
@@ -155,7 +156,7 @@ def teacher_update(
         print(str(el) + ", CF_time = " + str(round(cft - st, 4)) + " seconds", end=" ")
 
         ##2. 回放学习部分
-        if a.replay_learning and (mt == "BPR" or mt == "LightGCN"):
+        if a.replay_learning and (mt in ["TransformerSelf"]):
             # 判断是否使用退火技术来调整回放学习的权重
             if a.annealing:
                 # 使用指数退火调整lambda，随着时间的推移逐渐减少回放学习的影响
@@ -185,7 +186,7 @@ def teacher_update(
                 batch_label = torch.tensor(rl[s:en], dtype=torch.float16).to(g)
 
                 # 获取用户和项目的embedding
-                ue, ie = T.base_model.get_embedding()
+                ue, ie = T.base_model.get_embedding_weights()
                 bue = ue[bu]
                 bie = ie[bi]
 
@@ -528,7 +529,7 @@ def main(args):
     # Student via continual update
     if args.Using_CL:
         CL_model_task_path = os.path.join(
-            load_CL_model_dir_path, f"TASK_{task_idx}.pth"
+            load_CL_model_dir_path, f"TASK_{task_idx-1}.pth"
         )
         _, CL_score_mat, CL_sorted_mat = load_saved_model(CL_model_task_path, gpu)
 
@@ -553,7 +554,7 @@ def main(args):
         del CL_sorted_mat
 
     # Dataset / DataLoader
-    if model_type in ["BPR", "LightGCN"]:
+    if model_type in ["TransformerSelf"]:
         train_dataset = implicit_CF_dataset(
             p_total_user,
             p_total_item,
@@ -562,7 +563,7 @@ def main(args):
             p_train_interaction,
             negatvie_exclude,
         )
-    elif model_type == "VAE":
+    else:
         train_dataset = implicit_CF_dataset_AE(
             p_total_user, max_item, p_train_mat, is_user_side=True
         )
@@ -624,7 +625,7 @@ def main(args):
     ################################### Compose the initial dataset of replay learning (it adaptively changes through training) ##########################################################################################################################################################
 
     if args.replay_learning:
-        if model_type in ["BPR", "LightGCN"]:
+        if model_type in ["TransformerSelf"]:
             S_score_mat = (
                 torch.sigmoid(S_score_mat) if S_score_mat is not None else None
             )
@@ -635,7 +636,7 @@ def main(args):
                 torch.sigmoid(CL_score_mat) if CL_score_mat is not None else None
             )
 
-        elif model_type == "VAE":
+        else:
             S_score_mat = (
                 F.softmax(S_score_mat, dim=-1) if S_score_mat is not None else None
             )
@@ -668,7 +669,7 @@ def main(args):
         )
 
         # If the model is VAE, we use pseudo-labeling by imputing the replay_learning_dataset with args.VAE_replay_learning_value.
-        if model_type == "VAE":
+        if model_type in ["VAE"]:
             train_loader = get_VAE_replay_learning_loader_integrate_with_R(
                 replay_learning_dataset, p_R, p_total_user, max_item, args
             )
@@ -743,7 +744,7 @@ if __name__ == "__main__":
         "--save_path",
         "--sp",
         type=str,
-        default="../ckpt/Yelp/Teacher/using_LightGCN_0/Method_Test",
+        default="",
     )
     parser.add_argument(
         "--S_model_path", type=str, default="ckpts/New_Student/Stability"
@@ -882,10 +883,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Teacher's embedding dimension
-    if args.dataset == "Gowalla":
-        args.td = 64
-    elif args.dataset == "Yelp":
-        args.td = 128
+    # if args.dataset == "Gowalla":
+    #     args.td = 64
+    # elif args.dataset == "Yelp":
+    #     args.td = 128
 
     print_command_args(args)
     main(args)

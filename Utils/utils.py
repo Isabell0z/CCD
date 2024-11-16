@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 import ipdb
 
 # Custom Models
-from self_models.LWCKD import PIW_LWCKD
+from self_models.LWCKD import PIW_LWCKD, CL_VAE_expand
 from self_models.BaseModels import TransformerSelf, MFSelf, GCNSelf, VAESelf
 
 # from originalCCD.Models.LWCKD import PIW_LWCKD
@@ -49,7 +49,7 @@ def get_rank_score_mat_list(
     for m_name in model_list:
 
         model_path = os.path.join(load_path, m_name, f"TASK_{task_idx}.pth")
-        print(f"model_name = {m_name} and model_path = {model_path}")
+        print(f"model_type = {m_name} and model_path = {model_path}")
 
         # Score and Sorted mat
         score_mat = torch.load(model_path, map_location=torch.device(gpu))[
@@ -176,7 +176,7 @@ def Teacher_update(
     args,
 ):
     """Update Teacher model from before model to present model including new users/items"""
-    if model_type in ["BPR", "LightGCN"]:
+    if model_type in ["BPR", "LightGCN", "TransformerSelf"]:
         b_user_mapping, b_item_mapping, b_rating_mat, UU, II = get_info_for_BPR_Teacher(
             b_user_ids, b_item_ids, b_train_dict
         )
@@ -237,6 +237,75 @@ def Teacher_update(
 
 
 def get_teacher_model(
+    model_type, b_total_user, b_total_item, b_R, task_idx, max_item, gpu, args
+):
+    if model_type == "TransformerSelf":
+        T_base_model = TransformerSelf(
+            num_users=b_total_user,
+            num_items=b_total_item,
+            embedding_dim=args.td,
+            nhead=4,
+            num_layers=2,
+        )
+    elif model_type == "GCNSelf":
+        T_base_model = GCNSelf(
+            num_users=b_total_user, num_items=b_total_item, hidden_channels=args.td
+        )
+    elif model_type == "MFSelf":
+        T_base_model = MFSelf(
+            num_users=b_total_user, num_items=b_total_item, embedding_dim=args.td
+        )
+    elif model_type == "VAESelf":
+        T_base_model = VAESelf(
+            num_users=b_total_user, num_items=b_total_item, embedding_dim=args.td
+        )
+    else:
+        print("invalid model type, QUIT")
+        sys.exit()
+
+    if task_idx == 1:
+        T_weight = None
+        if args.dataset == "Yelp":
+            T_model_path = f"ckpts/{args.dataset}/teachers/{args.teacher}.pth"  # m = LightGCN_0, ..., LightGCN_4 (5)
+            pth = torch.load(T_model_path, map_location=gpu)
+            T_score_mat = pth["score_mat"].detach().cpu()
+            T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
+            T_base_weight = pth["checkpoint"]  # LightGCN_0
+            T_base_model.load_state_dict(T_base_weight)
+    else:
+        T_model_path = os.path.join(
+            args.T_load_path, args.teacher, f"TASK_{task_idx - 1}.pth"
+        )
+
+        pth = torch.load(T_model_path, map_location=gpu)
+        T_score_mat = pth["score_mat"].detach().cpu()
+        T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
+        T_weight = pth["best_model"]  # LightGCN_0
+        T_base_model.load_state_dict(T_weight)
+    Teacher = PIW_LWCKD(
+        T_base_model,
+        LWCKD_flag=False,  # True
+        PIW_flag=True,
+        temperature=args.T,
+        num_cluster=args.nc,
+        dim=args.td,
+        gpu=gpu,
+        model_type=model_type,
+    )
+    if T_weight is not None:
+        try:
+            if type(T_weight) != dict:
+                T_weight = T_weight.state_dict()
+            Teacher.load_state_dict(T_weight)
+            print("Teacher's weight loading Success!")
+        except:
+            print("Teacher's weight loading Fail!")
+            pass
+
+    return Teacher, T_sorted_mat
+
+
+def get_teacher_model_origin(
     model_type, b_total_user, b_total_item, b_R, task_idx, max_item, gpu, args
 ):
     """Load teacher model"""
@@ -816,8 +885,8 @@ def load_saved_model(path, gpu):
     pth = torch.load(path, map_location=gpu)
     if "best_model" in pth.keys():
         model = pth["best_model"]
-        score_mat = pth["score_mat"]
-        sorted_mat = torch.topk(score_mat, 1000, dim=1)
+        score_mat = pth["score_mat"].detach().cpu()
+        sorted_mat = torch.topk(score_mat, 1000, dim=1).indices
     else:
         model = pth["checkpoint"]
         score_mat = pth["score_mat"].detach().cpu()
@@ -876,7 +945,7 @@ def load_pickle(file_path):
         return pickle.load(f)
 
 
-def get_user_item_interact(df: pd.DataFrame) -> defaultdict(list):
+def get_user_item_interact(df: pd.DataFrame) -> defaultdict(list):  # type: ignore
     user_item_interact = defaultdict(list)
     for row in df.itertuples():
         user_item_interact[row.user].append(row.item)
@@ -1252,7 +1321,7 @@ def get_CL_result(
 def get_eval_with_mat(
     train_mat, valid_mat, test_mat, sorted_mat, k_list, target_users=None
 ):
-
+    # ipdb.set_trace()
     max_k = max(k_list)
     eval_results = create_metrics(k_list)
 
@@ -1260,7 +1329,7 @@ def get_eval_with_mat(
         test_users = target_users
     else:
         test_users = list(test_mat.keys())
-    ipdb.set_trace()
+    # ipdb.set_trace()
     for test_user in test_users:
 
         try:
@@ -1289,11 +1358,11 @@ def get_eval_with_mat(
             for item in sorted_list:
                 if item not in already_seen_items:
                     # ipdb.set_trace()
-                    sorted_list_tmp.append(item.cpu())
+                    sorted_list_tmp.append(item)
 
                 if len(sorted_list_tmp) > max_k:
                     break
-            sorted_list_tmp = torch.stack(sorted_list_tmp)
+            # sorted_list_tmp = torch.stack(sorted_list_tmp)
 
             for k in k_list:
                 hit_k = len(set(sorted_list_tmp[:k]) & set(gt_mat[test_user].keys()))
@@ -1309,11 +1378,10 @@ def get_eval_with_mat(
                 # NDCG
                 denom = np.log2(np.arange(2, k + 2))
 
-                k_sorted = sorted_list_tmp[:, :k]
-                ipdb.set_trace()
+                k_sorted = sorted_list_tmp[:k]
+                # ipdb.set_trace()
                 dcg_k = np.sum(
-                    np.in1d(k_sorted, list(gt_mat[test_user].keys())).reshape(denom, -1)
-                    / denom
+                    np.in1d(k_sorted, list(gt_mat[test_user].keys())) / denom
                 )
                 idcg_k = np.sum(
                     (1 / denom)[: min(len(list(gt_mat[test_user].keys())), k)]
@@ -1954,10 +2022,10 @@ def get_score_mat_for_VAE(model, train_loader, gpu):
 
 
 def get_sorted_score_mat(model, topk=1000, return_sorted_mat=False):
-    user_emb, item_emb = model.base_model.get_embedding()
+    user_emb, item_emb = model.base_model.get_embedding_weights()
     score_mat = user_emb @ item_emb.T
     score_mat = score_mat.detach().cpu()
-
+    # ipdb.set_trace()
     if return_sorted_mat:
         sorted_mat = torch.topk(score_mat, k=topk, dim=-1, largest=True).indices
         sorted_mat = to_np(sorted_mat)

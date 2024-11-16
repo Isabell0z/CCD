@@ -490,8 +490,11 @@ def main(args):
     # save model
     if args.save:
         print("save model")
-        print("\n save P,S proxy")
-
+        print("\n save P,S proxy and CL model")
+        with torch.no_grad():
+            CL_score_mat, CL_sorted_mat = get_sorted_score_mat(
+                S_model, return_sorted_mat=True
+            )
         if args.save_path is not None:
             save_path = args.save_path
         else:
@@ -499,6 +502,7 @@ def main(args):
 
         save_S_proxy_dir_path = f"{save_path}/Stability"
         save_P_proxy_dir_path = f"{save_path}/Plasticity"
+        save_CL_dir_path = f"{save_path}/CL"
 
         for dir_path in [save_S_proxy_dir_path, save_P_proxy_dir_path]:
             if not os.path.exists(dir_path):
@@ -524,9 +528,20 @@ def main(args):
                 "score_mat": Filter_P_score_mat,
             },
         )
+        save_model(
+            save_CL_dir_path,
+            before_task,
+            {
+                "best_model": deepcopy(
+                    {k: v.cpu() for k, v in S_model.state_dict().items()}
+                ),
+                "score_mat": CL_score_mat,
+            },
+        )
 
         print("save_S_proxy_dir_path", save_S_proxy_dir_path)
         print("save_P_proxy_dir_path", save_P_proxy_dir_path)
+        print("save_CL_dir_model", save_CL_dir_path)
 
 
 if __name__ == "__main__":

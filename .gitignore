@@ -3,5 +3,6 @@ __pycache__
 *.out
 teachers
 students
-ckpts
+# ckpts
+*.pth
 training_logs
