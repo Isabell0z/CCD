@@ -87,10 +87,15 @@ def train_valid_test_split(df_task, valid_size=0.1, test_size=0.1):
             del test_dict[u]
 
     item_list = list(train_mat_R.keys())
+    num_base_block_users=max(train_dict.keys())+1
+    num_base_block_items = max(item_list) + 1
+
 
     return {"train_dict": defaultdict(list, train_dict),
             "valid_dict": defaultdict(list, valid_dict),
             "test_dict": defaultdict(list, test_dict),
+            "num_base_block_users":num_base_block_users,
+            "num_base_block_items":num_base_block_items,
             "item_list": item_list}
 
 def save_pickle(data, file_path):
@@ -104,8 +109,8 @@ def save_pickle(data, file_path):
 
 if __name__ == '__main__':
 
-    data_block_path= f"../dataset/Gowalla_new/total_blocks_timestamp.pickle"
-    data_dict_path= f"../dataset/Gowalla_new/"
+    data_block_path= f"../dataset/Gowalla_new0/total_blocks_timestamp.pickle"
+    data_dict_path= f"../dataset/Gowalla_new0/"
 
     # 读取数据
     df_gowalla=pd.read_csv("../loc-gowalla_totalCheckins.txt/gowalla_totalCheckins.txt",sep='\t',header=None)
