@@ -38,6 +38,12 @@ data mining
 
 Can be skipped if models are prepared.
 
+`python train_models.py --dataset {data} --model {model type} --cuda {device id}`
+
+- data: Yelp or Gowalla
+- model type: TransformerSelf, VAESelf or MFSelf
+- device id: default -> 0
+
 ## Knowledge Distillation
 
 `python kd.py --dataset {data} --model {model type} --cuda {device id}`
