@@ -94,7 +94,8 @@ def main(args):
     )
 
     # set student model and seed
-    model_type, _, model_seed = args.model.split("_")
+    model_type = args.model
+    model_seed = 0
     set_random_seed(int(model_seed))
     print(f"\n Model = {model_type}, Random seed = {model_seed}")
 
