@@ -629,7 +629,9 @@ if __name__ == "__main__":
     parser.add_argument("--T", help="temperature", type=int, default=5.0)
 
     # Data / Model / Target_task (i.e., k-th data block)
-    parser.add_argument("--model", "-m", type=str, help="LightGCN_0 or BPR_0")
+    parser.add_argument(
+        "--model", "-m", type=str, help="TransformerSelf, GCNSelf, MFSelf or VAESelf"
+    )
     parser.add_argument(
         "--dataset", "--d", type=str, default=None, help="Gowalla or Yelp"
     )

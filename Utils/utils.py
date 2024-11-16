@@ -14,6 +14,7 @@ from collections import defaultdict
 from copy import deepcopy
 from requests import get
 from torch.utils.data import DataLoader
+import ipdb
 
 # Custom Models
 from self_models.LWCKD import PIW_LWCKD
@@ -813,9 +814,14 @@ def set_random_seed(random_seed):
 
 def load_saved_model(path, gpu):
     pth = torch.load(path, map_location=gpu)
-    model = pth["checkpoint"]
-    score_mat = pth["score_mat"].detach().cpu()
-    sorted_mat = pth["sorted_mat"].detach().cpu()
+    if "best_model" in pth.keys():
+        model = pth["best_model"]
+        score_mat = pth["score_mat"]
+        sorted_mat = torch.topk(score_mat, 1000, dim=1)
+    else:
+        model = pth["checkpoint"]
+        score_mat = pth["score_mat"].detach().cpu()
+        sorted_mat = pth["sorted_mat"].detach().cpu()
     # sorted_mat = to_np(torch.topk(score_mat, k = 1000).indices)
     return model, score_mat, sorted_mat
 
@@ -1254,7 +1260,7 @@ def get_eval_with_mat(
         test_users = target_users
     else:
         test_users = list(test_mat.keys())
-
+    ipdb.set_trace()
     for test_user in test_users:
 
         try:
@@ -1282,10 +1288,12 @@ def get_eval_with_mat(
 
             for item in sorted_list:
                 if item not in already_seen_items:
-                    sorted_list_tmp.append(item)
+                    # ipdb.set_trace()
+                    sorted_list_tmp.append(item.cpu())
 
                 if len(sorted_list_tmp) > max_k:
                     break
+            sorted_list_tmp = torch.stack(sorted_list_tmp)
 
             for k in k_list:
                 hit_k = len(set(sorted_list_tmp[:k]) & set(gt_mat[test_user].keys()))
@@ -1300,8 +1308,12 @@ def get_eval_with_mat(
 
                 # NDCG
                 denom = np.log2(np.arange(2, k + 2))
+
+                k_sorted = sorted_list_tmp[:, :k]
+                ipdb.set_trace()
                 dcg_k = np.sum(
-                    np.in1d(sorted_list_tmp[:k], list(gt_mat[test_user].keys())) / denom
+                    np.in1d(k_sorted, list(gt_mat[test_user].keys())).reshape(denom, -1)
+                    / denom
                 )
                 idcg_k = np.sum(
                     (1 / denom)[: min(len(list(gt_mat[test_user].keys())), k)]
