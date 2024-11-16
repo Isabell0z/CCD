@@ -1,36 +1,55 @@
 # CCD
 data mining
 
-run: (task 2-5 run after KD)
+# Directory
 
+```
+├─dataset
+│  ├─Gowalla
+│  └─Yelp
+├─ckpts
+│  ├─Gowalla
+│  └─Yelp
+│     ├─students (student models saved here)
+│     │  
+│     └─teachers (teacher models put here)
+│        ├─MFSelf_TASK_0.pth
+│        ├─TransformerSelf_TASK_0.pth
+│        └─VAESelf_TASK_0.pth
+├─ensemble_utils
+├─KD_utils
+├─llw
+│  ├─dataset
+│  │  ├─Gowalla
+│  │  └─Gowalla_new0
+│  ├─data_process
+│  └─Utils
+├─originalCCD
+│  ├─figure
+│  ├─Models
+│  ├─Run
+│  └─Utils
+├─self_models
+└─Utils
+```
 
-task 1:
+# Run
+## Train Teacher Models
 
-python -u Student_update.py --d Yelp -m LightGCN_1 --tt 1 --rl --US --UP --ab 50 --ss 1 --ps 0 --sw 1.0 --pw 0.0 --max_epoch 10
+Can be skipped if models are prepared.
 
-task 2:
+## Knowledge Distillation
 
-python -u Student_update.py --d Yelp -m LightGCN_1 --tt 2 --rl --US --UP --ab 100 --ss 3 --ps 5 --sw 1.0 --pw 0.1 --max_epoch 10
+`python kd.py --dataset {data} --model {model type} --cuda {device id}`
 
-task 3:
+- data: Yelp or Gowalla
+- model type: TransformerSelf, VAESelf or MFSelf
+- device id: default -> 0
 
-python -u Student_update.py --d Yelp -m LightGCN_1 --tt 3 --rl --US --UP --ab 100 --ss 5 --ps 5 --sw 0.9 --pw 0.0 --max_epoch 10
+## Student Update
 
-task 4:
+`python -u student_update.py --d Yelp -m TransformerSelf_TASK_0 --tt 1 --rl --US --UP --ab 50 --ss 1 --ps 0 --sw 1.0 --pw 0.0 --max_epoch 10`
 
-python -u Student_update.py --d Yelp -m LightGCN_1 --tt 4 --rl --US --UP --ab 50 --ss 1 --ps 5 --sw 0.9 --pw 0.0  --max_epoch 10
+## Teacher Update
 
-task 5:
-
-python -u Student_update.py --d Yelp -m LightGCN_1 --tt 5 --rl --US --UP --ab 50 --ss 3 --ps 1 --sw 0.9 --pw 0.0 --max_epoch 10
-
-
-student updata:
-
-1. use original utils.py
-
-2. evaluation part: 
-
-a. student, P and S proxy after KD
-
-b. best student model
+todo
