@@ -15,7 +15,7 @@ from KD_utils.dataset import KDDataset
 def main(args):
 
     device = f"cuda:{args.cuda}" if torch.cuda.is_available() else "cpu"
-    save_path = f"ckpts/{args.dataset}/teachers"
+    save_path = f"ckpts/{args.dataset}/teachers/{args.model}"
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
@@ -86,7 +86,7 @@ def main(args):
             "score_mat": model.get_score_mat(),
             "sorted_mat": model.get_top_k(1000)[1],
         },
-        f"{save_path}/{model_name}_TASK_0.pth",
+        f"{save_path}/{model_name}/TASK_0.pth",
     )
     print("Training complete.")
 

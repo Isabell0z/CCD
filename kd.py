@@ -155,13 +155,13 @@ def main(args):
     device = f"cuda:{args.cuda}" if torch.cuda.is_available() else "cpu"
     # load data
     print(f"loading dataset")
-    pickle_data = f"dataset/{args.dataset}/TASK_0.pickle"
+    pickle_data = f"dataset/{args.dataset}/TASK_{args.target_task}.pickle"
     with open(pickle_data, "rb") as f:
         data = pickle.load(f)
     students_path = f"ckpts/{args.dataset}/students"
     model_name = args.model
-    if not os.path.exists(f"{students_path}/{model_name}_0"):
-        os.makedirs(f"{students_path}/{model_name}_0")
+    # if not os.path.exists(f"{students_path}/{model_name}"):
+    #     os.makedirs(f"{students_path}/{model_name}_0")
     train_dataset = KDDataset(pickle_data=data, level="train")
     dataloader = DataLoader(train_dataset, batch_size=2**12, shuffle=True)
     # init teacher model
@@ -214,18 +214,22 @@ def main(args):
     else:
         print("invalid model type, QUIT")
         sys.exit()
-    ckpt = torch.load(f"ckpts/{args.dataset}/teachers/{args.model}_TASK_0.pth")
+
+    teacher_path = (
+        f"ckpts/{args.dataset}/teachers/{args.model}/TASK_{args.target_task}.pth"
+    )
+    ckpt = torch.load(teacher_path)
     teacher_model.load_state_dict(ckpt["checkpoint"])
     if args.load:
-        ckpt_s = torch.load(f"{students_path}/{model_name}/Distilled/student.pth")
-        student_model.load_state_dict(ckpt_s)
+        # ckpt_s = torch.load(f"{students_path}/{model_name}/Distilled/student.pth")
+        # student_model.load_state_dict(ckpt_s)
         # load expert models
         experts = {
             "item_experts": torch.load(
-                f"{students_path}/{model_name}_0/5_item_experts.pth"
+                f"{students_path}/{model_name}_{args.target_task-1}/5_item_experts.pth"
             ),
             "user_experts": torch.load(
-                f"{students_path}/{model_name}_0/5_user_experts.pth"
+                f"{students_path}/{model_name}_{args.target_task-1}/5_user_experts.pth"
             ),
         }
     else:
@@ -247,7 +251,7 @@ def main(args):
         device=device,
     )
     # run kd
-    kd.train(epoch=100)
+    kd.train(epoch=args.max_epoch)
     # save
     kd.save_models(
         f"{students_path}/{model_name}/Test/Distilled/", task=args.target_task
@@ -270,7 +274,7 @@ if __name__ == "__main__":
         default=False,
         help="Whether load pre-trained student model",
     )
-    parser.add_argument("--target_task", "--tt", type=str, help="target task id")
-    parser.add_argument("--epoch", "--ep", type=int, default=100)
+    parser.add_argument("--target_task", "--tt", type=int, help="target task id")
+    parser.add_argument("--max_epoch", "--me", type=int, default=100)
     args = parser.parse_args()
     main(args)

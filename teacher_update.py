@@ -83,17 +83,10 @@ def teacher_update(
     nu_tm,
     g,
 ):
-    ## 1.Teacher模型更新
 
-    # 根据模型类型配置优化器参数和loss类型
-    if mt not in ["TransformerSelf"]:
-        # 对于BPR或LightGCN，将模型参数和聚类参数包装在一起
-        p = [{"params": T.parameters()}, {"params": T.cluster}]
-        lt = ["base", "UI", "IU", "UU", "II", "cluster"]
-    else:
-        # 对于VAE，只需要模型的主要参数
-        p = T.parameters()
-        lt = ["base", "kl"]
+    # 对于BPR或LightGCN，将模型参数和聚类参数包装在一起
+    p = [{"params": T.parameters()}, {"params": T.cluster}]
+    lt = ["base", "UI", "IU", "UU", "II", "cluster"]
 
     # 初始化Adam优化器
     opt = optim.Adam(p, lr=a.lr, weight_decay=a.reg)
@@ -107,6 +100,7 @@ def teacher_update(
         "best_model": None,
         "score_mat": None,
         "sorted_mat": None,
+        "base_model": None,
         "patience": 0,
         "avg_valid_score": 0,
         "avg_test_score": 0,
@@ -128,17 +122,13 @@ def teacher_update(
         T.train()
         for mb in tl:
             # 正向传播计算loss
-            if mt not in ["TransformerSelf"]:
-                # ipdb.set_trace()
-                base_loss, UI_loss, IU_loss, UU_loss, II_loss, cluster_loss = T(mb)
-                batch_loss = (
-                    base_loss
-                    + a.LWCKD_lambda * (UI_loss + IU_loss + UU_loss + II_loss)
-                    + (a.cluster_lambda * cluster_loss)
-                )
-            else:
-                base_loss, kl_loss = T(mb)
-                batch_loss = base_loss + a.kl_lambda * kl_loss
+
+            base_loss, UI_loss, IU_loss, UU_loss, II_loss, cluster_loss = T(mb)
+            batch_loss = (
+                base_loss
+                + a.LWCKD_lambda * (UI_loss + IU_loss + UU_loss + II_loss)
+                + (a.cluster_lambda * cluster_loss)
+            )
             # 反向传播和优化
             opt.zero_grad()
             sc.scale(batch_loss).backward()
@@ -167,6 +157,9 @@ def teacher_update(
                 replay_learning_lambda = a.replay_learning_lambda
 
             # 打乱回放学习数据集
+            replay_learning_dataset = get_total_replay_learning_dataset_Teacher(
+                Tsm, Ssm, Srm, Psm, Prm, CLsm, CLrm, a
+            )
             sl = random.sample(replay_learning_dataset, len(replay_learning_dataset))
             ul, il, rl = list(zip(*sl))
             it = (len(sl) // a.bs) + 1
@@ -232,18 +225,10 @@ def teacher_update(
             T.eval()
             with torch.no_grad():
                 # 计算得分矩阵
-                # if mt == "BPR" or mt == "LightGCN":
-                #     Tsm, Tsmat = get_sorted_score_mat(
-                #         T, topk=1000, return_sorted_mat=True
-                #     )
-                # else:
-                #     if mt == "VAE":
-                #         Tsm = get_score_mat_for_VAE(T.base_model, tl, g).detach().cpu()
-                #         Tsmat = to_np(torch.topk(Tsm, k=1000)[1])
                 Tsm, Tsmat = get_sorted_score_mat(T, topk=1000, return_sorted_mat=True)
-                ipdb.set_trace()
+                # ipdb.set_trace()
             # 获取当前任务的评估结果
-            vl, tl = get_CL_result(
+            vl, test_list = get_CL_result(
                 ttd,
                 tvd,
                 ttds,
@@ -256,7 +241,7 @@ def teacher_update(
 
             # 计算平均分数
             avs = get_average_score(vl[: ti + 1], "valid_R20")
-            ats = get_average_score(tl[: ti + 1], "test_R20")
+            ats = get_average_score(test_list[: ti + 1], "test_R20")
 
             # 根据配置选择验证集或测试集的平均分数
             if a.eval_average_acc:
@@ -264,7 +249,7 @@ def teacher_update(
                 ts = ats
             else:
                 vs = vl[ti]["valid_R20"]
-                ts = tl[ti]["test_R20"]
+                ts = test_list[ti]["test_R20"]
 
             # 获取新用户的评估结果
             print("\t[The Result of new users in " + str(ti) + "-th Block]")
@@ -350,8 +335,17 @@ def teacher_update(
 
     print("\t[The Result of new users in " + str(ti) + "-th Block]")
     print("\t" + bnur + "\n")
+    ea["base_model"] = {
+        basemodel(k): v.cpu()
+        for k, v in ea["best_model"].items()
+        if k.startswith("base_model")
+    }
 
     return ea
+
+
+def basemodel(x):
+    return x[11:]
 
 
 def main(args):
@@ -366,7 +360,8 @@ def main(args):
         "Yelp",
     ], "Dataset must be either 'Gowalla' or 'Yelp'."
 
-    model_type, _, model_seed = args.teacher.split("_")
+    model_type = args.teacher
+    model_seed = 0
 
     # Random Seed
     print(f"Random_seed = {model_seed}")
@@ -439,7 +434,7 @@ def main(args):
         args.S_load_path = f"ckpts/{args.dataset}/students/{args.student}/Test"
 
     if args.T_load_path is None:
-        args.T_load_path = f"ckpts/{args.dataset}/teachers/using_student_{args.student}/Test"  # The student should be specified because the student and teacher collaboratively evolve along the data stream in our proposed CCD framework.
+        args.T_load_path = f"ckpts/{args.dataset}/teachers/{model_type}"  # The student should be specified because the student and teacher collaboratively evolve along the data stream in our proposed CCD framework.
 
     print(
         f"Student = {args.student} (with low dimensionailty), S_load_path = {args.S_load_path}"
@@ -458,9 +453,11 @@ def main(args):
     RRD_SM_dir_path = f"{args.T_load_path}/"
 
     # Load teacher
-    RRD_SM_path = f"{RRD_SM_dir_path}/TASK_{distillation_idx}_score_mat.pth"
-    if distillation_idx == 0:
-        RRD_SM_path = f"ckpts/{args.dataset}/teachers/{args.teacher}.pth"
+    # RRD_SM_path = f"{RRD_SM_dir_path}/TASK_{distillation_idx}_score_mat.pth"
+    # if distillation_idx == 0:
+    RRD_SM_path = (
+        f"ckpts/{args.dataset}/teachers/{model_type}/TASK_{args.target_task-1}.pth"
+    )
     T_score_mat = (
         torch.load(RRD_SM_path, map_location=gpu)["score_mat"].detach().cpu()
     )  # RRD_SM[f"TASK_{distillation_idx}"]
@@ -529,7 +526,7 @@ def main(args):
     # Student via continual update
     if args.Using_CL:
         CL_model_task_path = os.path.join(
-            load_CL_model_dir_path, f"TASK_{task_idx-1}.pth"
+            load_CL_model_dir_path, f"TASK_{task_idx}.pth"
         )
         _, CL_score_mat, CL_sorted_mat = load_saved_model(CL_model_task_path, gpu)
 
@@ -548,6 +545,7 @@ def main(args):
         u_size, i_size = negatvie_exclude.shape
         negatvie_exclude_expand = torch.full((p_total_user, i_size), -1.0)
         negatvie_exclude_expand[:u_size, :i_size] = negatvie_exclude
+        # ipdb.set_trace()
         negatvie_exclude = torch.cat(
             [negatvie_exclude_expand, torch.tensor(CL_sorted_mat[:, :40])], dim=1
         )
@@ -709,7 +707,7 @@ def main(args):
         else:
             save_path = args.T_load_path
 
-        Teacher_dir_path = os.path.join(save_path, args.teacher)  # model name
+        Teacher_dir_path = save_path  # model name
 
         if not os.path.exists(Teacher_dir_path):
             os.makedirs(Teacher_dir_path)
@@ -719,6 +717,7 @@ def main(args):
             {
                 "best_model": eval_args["best_model"],
                 "score_mat": eval_args["score_mat"],
+                "checkpoint": eval_args["base_model"],
             },
         )
 
@@ -744,7 +743,7 @@ if __name__ == "__main__":
         "--save_path",
         "--sp",
         type=str,
-        default="",
+        default=None,
     )
     parser.add_argument(
         "--S_model_path", type=str, default="ckpts/New_Student/Stability"

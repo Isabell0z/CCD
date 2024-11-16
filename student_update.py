@@ -135,10 +135,10 @@ def main(args):
         S_score_mat = deepcopy(Distill_score_mat)
     else:
         # according to the weight of P proxy and S proxy to create P proxy and S proxy model
-        P_proxy_rootpath = f"ckpts/{args.dataset}/student/{model_type}/Test/Plasticity"
-        S_proxy_rootpath = f"ckpts/{args.dataset}/student/{model_type}/Test/Stability"
-        P_proxy_path = os.path.join(P_proxy_rootpath, f"TASK_{before_task - 1}.pth")
-        S_proxy_path = os.path.join(S_proxy_rootpath, f"TASK_{before_task - 1}.pth")
+        P_proxy_rootpath = f"ckpts/{args.dataset}/students/{model_type}/Test/Plasticity"
+        S_proxy_rootpath = f"ckpts/{args.dataset}/students/{model_type}/Test/Stability"
+        P_proxy_path = os.path.join(P_proxy_rootpath, f"TASK_{before_task-1}.pth")
+        S_proxy_path = os.path.join(S_proxy_rootpath, f"TASK_{before_task-1}.pth")
         P_proxy_weight = torch.load(P_proxy_path)["best_model"]
         S_proxy_weight = torch.load(S_proxy_path)["best_model"]
         proxy_get_data = before_task - 1
@@ -212,12 +212,10 @@ def main(args):
     ######
 
     # get top 40 items from Teacher, Student, S and P proxy
-    if before_task == 0:
-        Teacher_path = (
-            f"ckpts/{args.dataset}/teachers/{model_type}_TASK_{before_task}.pth"
-        )
-    else:
-        Teacher_path = f"ckpts/{args.dataset}/teachers/using_student_{model_type}/TASK_{before_task}_score_mat.pth"
+
+    Teacher_path = f"ckpts/{args.dataset}/teachers/{model_type}/TASK_{before_task}.pth"
+    # else:
+    #     Teacher_path = f"ckpts/{args.dataset}/teachers/using_student_{model_type}/TASK_{before_task}_score_mat.pth"
     Teacher_score_mat = (
         torch.load(Teacher_path, map_location=gpu)["score_mat"].detach().cpu()
     )
@@ -250,10 +248,10 @@ def main(args):
             total_test_dataset,
             S_sorted_mat,
             args.k_list,
-            current_task_idx=args.num_task - 1,
+            current_task_idx=current_task,
             FB_flag=False,
             return_value=False,
-            max_task=current_task,
+            max_task=args.num_task - 1,
         )
         exclude_top_items = torch.cat(
             [exclude_top_items, torch.tensor(S_sorted_mat[:, :40])], dim=1
@@ -264,10 +262,10 @@ def main(args):
             total_test_dataset,
             P_sorted_mat,
             args.k_list,
-            current_task_idx=args.num_task - 1,
+            current_task_idx=current_task,
             FB_flag=False,
             return_value=False,
-            max_task=current_task,
+            max_task=args.num_task - 1,
         )
         exclude_top_items = torch.cat(
             [exclude_top_items, torch.tensor(P_sorted_mat[:, :40])], dim=1
@@ -530,7 +528,7 @@ def main(args):
         )
         save_model(
             save_CL_dir_path,
-            before_task,
+            current_task,
             {
                 "best_model": deepcopy(
                     {k: v.cpu() for k, v in S_model.state_dict().items()}

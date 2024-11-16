@@ -266,17 +266,15 @@ def get_teacher_model(
     if task_idx == 1:
         T_weight = None
         if args.dataset == "Yelp":
-            T_model_path = f"ckpts/{args.dataset}/teachers/{args.teacher}.pth"  # m = LightGCN_0, ..., LightGCN_4 (5)
+            T_model_path = f"ckpts/{args.dataset}/teachers/{model_type}/TASK_{args.target_task-1}.pth"  # m = LightGCN_0, ..., LightGCN_4 (5)
             pth = torch.load(T_model_path, map_location=gpu)
             T_score_mat = pth["score_mat"].detach().cpu()
             T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
             T_base_weight = pth["checkpoint"]  # LightGCN_0
             T_base_model.load_state_dict(T_base_weight)
     else:
-        T_model_path = os.path.join(
-            args.T_load_path, args.teacher, f"TASK_{task_idx - 1}.pth"
-        )
-
+        T_model_path = os.path.join(args.T_load_path, f"TASK_{task_idx - 1}.pth")
+        # T_model_path = f"ckpts/Yelp/teachers/TransformerSelf/TASK_{task_idx - 1}.pth"
         pth = torch.load(T_model_path, map_location=gpu)
         T_score_mat = pth["score_mat"].detach().cpu()
         T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
@@ -339,9 +337,7 @@ def get_teacher_model_origin(
             T_base_model = eval(model_type)(*model_args)
             T_base_model.load_state_dict(T_base_weight)
     else:
-        T_model_path = os.path.join(
-            args.T_load_path, args.teacher, f"TASK_{task_idx - 1}.pth"
-        )
+        T_model_path = os.path.join(args.T_load_path, f"TASK_{task_idx - 1}.pth")
 
         pth = torch.load(T_model_path, map_location=gpu)
         T_score_mat = pth["score_mat"].detach().cpu()
@@ -2037,7 +2033,11 @@ def get_sorted_score_mat(model, topk=1000, return_sorted_mat=False):
 def filtering_simple(mat, filtered_data):
     """Filter the mat given filtered data (the size of mat > filtered data)"""
     u_size, i_size = mat.shape
+    # ipdb.set_trace()
     for u, items in filtered_data.items():
+        # print(items)
+        if not isinstance(items, list):
+            continue
         items = torch.tensor(items).long()
         if u < u_size:
             mat[u][items[items < i_size].long()] = -1e8
