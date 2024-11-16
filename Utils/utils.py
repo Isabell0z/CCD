@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 
 # Custom Models
 from self_models.LWCKD import PIW_LWCKD
-from self_models.BaseModels import TransformerSelf
+from self_models.BaseModels import TransformerSelf, MFSelf, GCNSelf, VAESelf
 
 # from originalCCD.Models.LWCKD import PIW_LWCKD
 
@@ -617,8 +617,13 @@ def get_model(
         base_model = eval(model_type)(*model_args)
         base_model = base_model.to(gpu)
     elif model_type == "TransformerSelf":
-        model_args = [before_total_user, before_total_item, 128, 2, 2]
-        base_model = TransformerSelf(*model_args)
+        model_args = [before_total_user, before_total_item, args.sd, 2, 2]
+        base_model = TransformerSelf(*model_args).to(gpu)
+    elif model_type == "MFSelf":
+        model_args = [before_total_user, before_total_item, args.sd]
+        base_model = MFSelf(before_total_user, before_total_item, args.sd).to(gpu)
+    elif model_type == "VAESelf":
+        base_model = VAESelf(before_total_user, before_total_item, args.sd).to(gpu)
 
     model = PIW_LWCKD(
         base_model,

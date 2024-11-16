@@ -81,15 +81,23 @@ class TransformerSelf(ModelSelf):
         neg_item = mini_batch["neg_item"]
 
         # 获取用户和物品的嵌入
-        u = self.user_emb(user).unsqueeze(1)  # (batch_size, 1, embedding_dim)
-        pos_emb = self.item_emb(pos_item).unsqueeze(1)  # (batch_size, 1, embedding_dim)
-        neg_emb = self.item_emb(neg_item).unsqueeze(1)  # (batch_size, 1, embedding_dim)
 
+        u = self.user_emb(user)  # (batch_size, 1, embedding_dim)
+        pos_emb = self.item_emb(pos_item)  # (batch_size, 1, embedding_dim)
+        neg_emb = self.item_emb(neg_item)  # (batch_size, 1, embedding_dim)
+        if len(u.shape) < len(pos_emb.shape):
+            u = u.unsqueeze(1)
+        if len(u.shape) == 2:
+            u = u.unsqueeze(1)
+            pos_emb = pos_emb.unsqueeze(1)
+            neg_emb = neg_emb.unsqueeze(1)
         # 合并嵌入
+        # print("SHAPE SHAPE SHAPE", u.shape, pos_emb.shape)
         pos_input = torch.cat([u, pos_emb], dim=1)  # (batch_size, 2, embedding_dim)
         neg_input = torch.cat([u, neg_emb], dim=1)  # (batch_size, 2, embedding_dim)
 
         # Transformer编码
+        # print("size:", user.shape, u.shape, pos_input.shape)
         pos_output = self.transformer_encoder(
             pos_input
         )  # (batch_size, 2, embedding_dim)

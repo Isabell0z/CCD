@@ -1,6 +1,5 @@
 import argparse
 import time
-import argparse
 import random
 import time
 import gc
@@ -95,15 +94,17 @@ def main(args):
     )
 
     # set student model and seed
-    model_type, model_seed = args.model.split("_")
+    model_type, _, model_seed = args.model.split("_")
     set_random_seed(int(model_seed))
     print(f"\n Model = {model_type}, Random seed = {model_seed}")
 
     # load student model
 
-    Distill_Student_rootpath = f"students/{args.model}/"
+    Distill_Student_rootpath = (
+        f"ckpts/{args.dataset}/students/{model_type}/Test/Distilled"
+    )
     Distill_Student_path = os.path.join(
-        Distill_Student_rootpath, f"task{before_task}_student.pth"
+        Distill_Student_rootpath, f"TASK_{before_task}.pth"
     )
     Distill_model_weight, Distill_score_mat, Distill_sorted_mat = load_saved_model(
         Distill_Student_path, gpu
@@ -134,12 +135,8 @@ def main(args):
         S_score_mat = deepcopy(Distill_score_mat)
     else:
         # according to the weight of P proxy and S proxy to create P proxy and S proxy model
-        P_proxy_rootpath = (
-            f"../ckpt/{args.dataset}/Student/{args.model}/Method/Plasticity"
-        )
-        S_proxy_rootpath = (
-            f"../ckpt/{args.dataset}/Student/{args.model}/Method/Stability"
-        )
+        P_proxy_rootpath = f"ckpts/{args.dataset}/student/{model_type}/Test/Plasticity"
+        S_proxy_rootpath = f"ckpts/{args.dataset}/student/{model_type}/Test/Stability"
         P_proxy_path = os.path.join(P_proxy_rootpath, f"TASK_{before_task - 1}.pth")
         S_proxy_path = os.path.join(S_proxy_rootpath, f"TASK_{before_task - 1}.pth")
         P_proxy_weight = torch.load(P_proxy_path)["best_model"]
@@ -216,9 +213,11 @@ def main(args):
 
     # get top 40 items from Teacher, Student, S and P proxy
     if before_task == 0:
-        Teacher_path = f"teachers/task0_transformer.pth"
+        Teacher_path = (
+            f"ckpts/{args.dataset}/teachers/{model_type}_TASK_{before_task}.pth"
+        )
     else:
-        Teacher_path = f"../ckpt/{args.dataset}/Teacher/using_student_{args.model}/Method/Ensemble/TASK_{before_task}_score_mat.pth"
+        Teacher_path = f"ckpts/{args.dataset}/teachers/using_student_{model_type}/TASK_{before_task}_score_mat.pth"
     Teacher_score_mat = (
         torch.load(Teacher_path, map_location=gpu)["score_mat"].detach().cpu()
     )
@@ -496,7 +495,7 @@ def main(args):
         if args.save_path is not None:
             save_path = args.save_path
         else:
-            save_path = f"../ckpt/{args.dataset}/Student/{args.model}/Method"
+            save_path = f"ckpts/{args.dataset}/students/{model_type}/Test"
 
         save_S_proxy_dir_path = f"{save_path}/Stability"
         save_P_proxy_dir_path = f"{save_path}/Plasticity"
@@ -539,9 +538,7 @@ if __name__ == "__main__":
         action=argparse.BooleanOptionalAction,
         help="whether saving param or not (--s or --no-s)",
     )
-    parser.add_argument(
-        "--save_path", "--sp", type=str, default="ckpts/transformer/Test"
-    )
+    parser.add_argument("--save_path", "--sp", type=str)
 
     # etc
     parser.add_argument("--gpu", type=int, default=0)
@@ -554,7 +551,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--nns", help="the number of negative sample", type=int, default=1
     )
-    parser.add_argument("--sd", help="student_dims", type=int, default=128)
+    parser.add_argument("--sd", help="student_dims", type=int, default=8)
 
     # S/P proxies & Replay Learning
     parser.add_argument(
