@@ -503,6 +503,18 @@ def main(args):
         save_P_proxy_dir_path = f"{save_path}/Plasticity"
         save_CL_dir_path = f"{save_path}/CL"
 
+        print(f"\t[The Result of new users in {current_task}-th Block]")
+        get_CL_result(
+            total_train_dataset,
+            total_valid_dataset,
+            total_test_dataset,
+            CL_sorted_mat,
+            args.k_list,
+            current_task,
+            FB_flag=False,
+            return_value=False,
+        )
+
         for dir_path in [save_S_proxy_dir_path, save_P_proxy_dir_path]:
             if not os.path.exists(dir_path):
                 os.makedirs(dir_path)
