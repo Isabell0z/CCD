@@ -112,7 +112,7 @@ def main(args):
     )
     before_R = make_R(before_user, before_item, before_train_mat)  # get score matrix
     before_SNM = get_SNM(before_user, before_item, before_R, gpu)
-    base_model_only = True if model_seed == "0" else False
+    base_model_only = True if before_task == 0 else False
 
     Distill_Student_model = get_model(
         before_user,
@@ -527,13 +527,16 @@ def main(args):
                 "score_mat": Filter_P_score_mat,
             },
         )
+        best_model = deepcopy({k: v.cpu() for k, v in S_model.state_dict().items()})
+        checkpoint = {
+            k[11:]: v.cpu() for k, v in best_model.items() if k.startswith("base_model")
+        }
         save_model(
             save_CL_dir_path,
             current_task,
             {
-                "best_model": deepcopy(
-                    {k: v.cpu() for k, v in S_model.state_dict().items()}
-                ),
+                "best_model": best_model,
+                "checkpoint": checkpoint,
                 "score_mat": CL_score_mat,
             },
         )

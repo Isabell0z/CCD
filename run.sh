@@ -19,7 +19,7 @@ python kd.py --dataset Yelp --model TransformerSelf --tt 4 --max_epoch 10
 python student_update.py --d Yelp -m TransformerSelf --tt 5 --rl --US --UP --ab 100 --ss 3 --ps 5 --sw 1.0 --pw 0.1 --max_epoch 50 --s
 python teacher_update.py --d Yelp --student TransformerSelf --teacher TransformerSelf --tt 5 --rl --UCL --US --UP --ab 100 --ss 1 --ps 3 --cs 5  --max_epoch 50 --s
 wait
-python KD.py --d Yelp -m TransformerSelf --tt 5 --max_epoch 10
+python kd.py --d Yelp -m TransformerSelf --tt 5 --max_epoch 10
 
 # date
 # squeue --job $SLURM_JOBID

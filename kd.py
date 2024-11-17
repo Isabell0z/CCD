@@ -11,6 +11,7 @@ from KD_utils.DE import Expert, compute_DE_loss
 from KD_utils.RRD import compute_RRD_loss
 from KD_utils.dataset import KDDataset
 from self_models.BaseModels import TransformerSelf, VAESelf, GCNSelf, MFSelf
+from Utils.utils import merge_model_kd
 
 
 class KD:
@@ -129,11 +130,14 @@ class KD:
                 base_loss_sum += base_loss.item()
             pbar.set_postfix({"loss": loss_sum, "base_loss": base_loss_sum})
 
-    def save_models(self, save_path, task):
+    def save_models(self, save_path, task, loaded_model):
         if not os.path.exists(save_path):
             os.makedirs(save_path)
+        if loaded_model is not None:
+            best_model = merge_model_kd(loaded_model, self.student_model.state_dict())
         torch.save(
             {
+                "best_model": best_model,
                 "checkpoint": self.student_model.state_dict(),
                 "score_mat": self.student_model.get_score_mat(),
                 "sorted_mat": self.student_model.get_top_k(1000)[1],
@@ -220,10 +224,12 @@ def main(args):
     )
     ckpt = torch.load(teacher_path)
     teacher_model.load_state_dict(ckpt["checkpoint"])
+    if args.target_task > 0:
+        s_ckpt = torch.load(
+            f"ckpts/{args.dataset}/students/{args.model}/Test/CL/TASK_{args.target_task}.pth"
+        )
+        student_model.load_state_dict(s_ckpt["checkpoint"])
     if args.load:
-        # ckpt_s = torch.load(f"{students_path}/{model_name}/Distilled/student.pth")
-        # student_model.load_state_dict(ckpt_s)
-        # load expert models
         experts = {
             "item_experts": torch.load(
                 f"{students_path}/{model_name}_{args.target_task-1}/5_item_experts.pth"
@@ -254,7 +260,9 @@ def main(args):
     kd.train(epoch=args.max_epoch)
     # save
     kd.save_models(
-        f"{students_path}/{model_name}/Test/Distilled/", task=args.target_task
+        f"{students_path}/{model_name}/Test/Distilled/",
+        task=args.target_task,
+        loaded_model=s_ckpt["best_model"],
     )
     # end
 

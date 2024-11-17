@@ -336,16 +336,12 @@ def teacher_update(
     print("\t[The Result of new users in " + str(ti) + "-th Block]")
     print("\t" + bnur + "\n")
     ea["base_model"] = {
-        basemodel(k): v.cpu()
+        k[11:]: v.cpu()
         for k, v in ea["best_model"].items()
         if k.startswith("base_model")
     }
 
     return ea
-
-
-def basemodel(x):
-    return x[11:]
 
 
 def main(args):
@@ -772,7 +768,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--nns", help="the number of negative sample", type=int, default=1
     )
-    parser.add_argument("--td", help="teacher embedding dims", type=int, default=64)
+    parser.add_argument("--td", help="teacher embedding dims", type=int, default=512)
 
     # LWCKD + PIW
     parser.add_argument("--nc", help="num_cluster", type=int, default=10)

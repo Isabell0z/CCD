@@ -262,24 +262,6 @@ def get_teacher_model(
     else:
         print("invalid model type, QUIT")
         sys.exit()
-
-    if task_idx == 1:
-        T_weight = None
-        if args.dataset == "Yelp":
-            T_model_path = f"ckpts/{args.dataset}/teachers/{model_type}/TASK_{args.target_task-1}.pth"  # m = LightGCN_0, ..., LightGCN_4 (5)
-            pth = torch.load(T_model_path, map_location=gpu)
-            T_score_mat = pth["score_mat"].detach().cpu()
-            T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
-            T_base_weight = pth["checkpoint"]  # LightGCN_0
-            T_base_model.load_state_dict(T_base_weight)
-    else:
-        T_model_path = os.path.join(args.T_load_path, f"TASK_{task_idx - 1}.pth")
-        # T_model_path = f"ckpts/Yelp/teachers/TransformerSelf/TASK_{task_idx - 1}.pth"
-        pth = torch.load(T_model_path, map_location=gpu)
-        T_score_mat = pth["score_mat"].detach().cpu()
-        T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
-        T_weight = pth["best_model"]  # LightGCN_0
-        T_base_model.load_state_dict(T_weight)
     Teacher = PIW_LWCKD(
         T_base_model,
         LWCKD_flag=False,  # True
@@ -290,15 +272,32 @@ def get_teacher_model(
         gpu=gpu,
         model_type=model_type,
     )
-    if T_weight is not None:
-        try:
-            if type(T_weight) != dict:
-                T_weight = T_weight.state_dict()
-            Teacher.load_state_dict(T_weight)
-            print("Teacher's weight loading Success!")
-        except:
-            print("Teacher's weight loading Fail!")
-            pass
+    if task_idx == 1:
+        T_weight = None
+        T_model_path = f"ckpts/{args.dataset}/teachers/{model_type}/TASK_{args.target_task-1}.pth"  # m = LightGCN_0, ..., LightGCN_4 (5)
+        pth = torch.load(T_model_path, map_location=gpu)
+        T_score_mat = pth["score_mat"].detach().cpu()
+        T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
+        T_base_weight = pth["checkpoint"]  # LightGCN_0
+        Teacher.T_base_model.load_state_dict(T_base_weight)
+    else:
+        T_model_path = os.path.join(args.T_load_path, f"TASK_{task_idx - 1}.pth")
+        # T_model_path = f"ckpts/Yelp/teachers/TransformerSelf/TASK_{task_idx - 1}.pth"
+        pth = torch.load(T_model_path, map_location=gpu)
+        T_score_mat = pth["score_mat"].detach().cpu()
+        T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
+        T_weight = pth["best_model"]  # LightGCN_0
+        Teacher.load_state_dict(T_weight)
+
+    # if T_weight is not None:
+    #     try:
+    #         if type(T_weight) != dict:
+    #             T_weight = T_weight.state_dict()
+    #         Teacher.load_state_dict(T_weight)
+    #         print("Teacher's weight loading Success!")
+    #     except:
+    #         print("Teacher's weight loading Fail!")
+    #         pass
 
     return Teacher, T_sorted_mat
 
@@ -2054,3 +2053,14 @@ def save_model(dir_path, task_idx, dict):
     save_path = os.path.join(dir_path, f"TASK_{task_idx}.pth")
     torch.save(dict, save_path)
     print(f"[Model Save Success] save_path = {save_path}")
+
+
+def basemodel(x):
+    return x[11:]
+
+
+def merge_model_kd(model, new_model):
+    for k in model.keys():
+        if k.startswith("base_model"):
+            model[k] = new_model[k[11:]]
+    return model
