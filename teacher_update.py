@@ -886,7 +886,7 @@ if __name__ == "__main__":
     #     args.td = 64
     # elif args.dataset == "Yelp":
     #     args.td = 128
-
+    args.td = 512
     print_command_args(args)
     main(args)
     print_command_args(args)

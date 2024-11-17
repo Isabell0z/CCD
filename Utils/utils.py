@@ -704,9 +704,9 @@ def get_model(
 
     if model_weight is not None:
         if base_model_only:
-            model.base_model.load_state_dict(model_weight)
+            model.base_model.load_state_dict(model_weight,strict=False)
         else:
-            model.load_state_dict(model_weight)
+            model.load_state_dict(model_weight,strict=False)
 
     return model
 
