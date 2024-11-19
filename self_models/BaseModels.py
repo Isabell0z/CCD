@@ -37,8 +37,8 @@ class ModelSelf(nn.Module):
         return torch.cat((pos_emb, neg_emb), dim=-1), u
 
     def get_score_mat(self, user=None):
-        users = torch.arange(0, self.user_count).long().cuda()
-        items = torch.arange(0, self.item_count).long().cuda()
+        users = torch.arange(0, self.user_count).long().to("cuda")
+        items = torch.arange(0, self.item_count).long().to("cuda")
         with torch.no_grad():
             u_emb = self.user_emb(users)
             i_emb = self.item_emb(items)
@@ -58,7 +58,7 @@ class ModelSelf(nn.Module):
         return topk
 
     def get_loss(self, pos_score, neg_score):
-        return -torch.sum(torch.log(torch.sigmoid(pos_score - neg_score)))
+        return -torch.mean(torch.log(torch.sigmoid(pos_score - neg_score)))
 
 
 class TransformerSelf(ModelSelf):
@@ -135,9 +135,9 @@ class TransformerSelf(ModelSelf):
         neg_output = self.transformer_encoder(neg_emb)  # (batch_size, 2, embedding_dim)
         return torch.cat((pos_output, neg_output), dim=-1), u
 
-    def get_score_mat(self, user=None):
-        users = torch.arange(0, self.user_count).long().to("cuda:1")
-        items = torch.arange(0, self.item_count).long().to("cuda:1")
+    def get_score_mat(self, user=None, device="cuda"):
+        users = torch.arange(0, self.user_count).long().to(device)
+        items = torch.arange(0, self.item_count).long().to(device)
         with torch.no_grad():
             u_emb = self.transformer_encoder(self.user_emb(users))
             i_emb = self.transformer_encoder(self.item_emb(items))

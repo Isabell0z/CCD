@@ -404,9 +404,6 @@ def main(args):
             optimizer.zero_grad()
             batch_loss.backward()
             optimizer.step()
-            # scaler.scale(batch_loss).backward()
-            # scaler.step(optimizer)
-            # scaler.update()
             CF_loss += batch_loss.item()
 
         CF_time = time.time()
@@ -460,9 +457,6 @@ def main(args):
                 optimizer.zero_grad()
                 batch_loss.backward()
                 optimizer.step()
-                # scaler.scale(batch_loss).backward()
-                # scaler.step(optimizer)
-                # scaler.update()
 
                 replay_learning_loss += batch_loss.item()
 
@@ -690,12 +684,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Student's embedding dimension
-    if args.sd == None:
-        if args.dataset == "Gowalla":
-            args.sd = 16
 
-        elif args.dataset == "Yelp":
-            args.sd = 8
+    args.sd = 8
 
     print_command_args(args)
     main(args)
