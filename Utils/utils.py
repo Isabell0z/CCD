@@ -208,19 +208,6 @@ def Teacher_update(
             T_score_mat, T_sorted_mat = get_sorted_score_mat(
                 Teacher, topk=1000, return_sorted_mat=True
             )
-
-    elif model_type == "VAE":
-        common_interaction = get_info_for_VAE_Teacher(
-            b_user_ids, b_item_ids, p_user_ids, p_item_ids, b_R
-        )
-        Teacher.update(
-            p_total_user,
-            p_total_item,
-            b_total_user,
-            b_total_item,
-            common_interaction,
-            T_score_mat,
-        )
         Teacher = Teacher.to(gpu)
 
         del common_interaction, T_score_mat
