@@ -6,3 +6,5 @@ students
 # ckpts
 *.pth
 training_logs
+ckpt.zip
+originalCCD

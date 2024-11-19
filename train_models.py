@@ -13,9 +13,9 @@ from KD_utils.dataset import KDDataset
 
 
 def main(args):
-
+    torch.manual_seed(args.id + 1)
     device = f"cuda:{args.cuda}" if torch.cuda.is_available() else "cpu"
-    save_path = f"ckpts/{args.dataset}/teachers/{args.model}"
+    save_path = f"ckpts/{args.dataset}/teachers"
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
@@ -25,7 +25,7 @@ def main(args):
     with open(data_pickle, "rb") as f:
         data = pickle.load(f)
     train_dataset = KDDataset(pickle_data=data, level="train")
-    dataloader = DataLoader(train_dataset, batch_size=1024 * 4, shuffle=True)
+    dataloader = DataLoader(train_dataset, batch_size=1024 * 2, shuffle=True)
 
     # hyper params
     embedding_dim = 512
@@ -58,12 +58,12 @@ def main(args):
         sys.exit()
 
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=(args.id + 1) * 0.00132)
 
     print(f"training")
     # train
     model.train()
-    pbar = tqdm(range(1000), desc="training epoch")
+    pbar = tqdm(range(200), desc="training epoch")
     for epoch in pbar:
         total_loss = 0
         for batch in dataloader:
@@ -78,15 +78,15 @@ def main(args):
             total_loss += loss.item()
         pbar.set_postfix({"loss": total_loss / len(dataloader)})
         # print(f'Epoch {epoch + 1}, Loss: {total_loss / len(dataloader)}')
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
+    if not os.path.exists(f"{save_path}/{model_name}"):
+        os.makedirs(f"{save_path}/{model_name}")
     torch.save(
         {
             "checkpoint": model.state_dict(),
             "score_mat": model.get_score_mat(),
-            "sorted_mat": model.get_top_k(1000)[1],
+            "sorted_mat": model.get_top_k(1000).indices,
         },
-        f"{save_path}/{model_name}/TASK_0.pth",
+        f"{save_path}/{model_name}/TASK_0_{args.id}.pth",
     )
     print("Training complete.")
 
@@ -100,5 +100,6 @@ if __name__ == "__main__":
         "--dataset", "--d", type=str, default=None, help="Gowalla or Yelp"
     )
     parser.add_argument("--cuda", "-c", type=str, default="0", help="device id")
+    parser.add_argument("--id", "-i", type=int, default=0, help="model id")
     args = parser.parse_args()
     main(args)

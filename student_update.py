@@ -112,7 +112,8 @@ def main(args):
     )
     before_R = make_R(before_user, before_item, before_train_mat)  # get score matrix
     before_SNM = get_SNM(before_user, before_item, before_R, gpu)
-    base_model_only = True if before_task == 0 else False
+    # base_model_only = True if before_task == 0 else False
+    base_model_only = False
 
     Distill_Student_model = get_model(
         before_user,

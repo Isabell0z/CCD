@@ -1,10 +1,3 @@
-"""
-Created on  Oct 28 2024
-Author: REN Zhihao
-Description: This script contains the function to update the teacher model.
-Note: 请记得导入Utils文件夹中的data_loaders.py和utils.py
-"""
-
 import argparse
 import random
 import time
@@ -12,7 +5,6 @@ import gc
 import sys
 import os
 from copy import deepcopy
-import ipdb
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
@@ -26,332 +18,13 @@ from torch.utils.data import DataLoader
 from Utils.data_loaders import *
 from Utils.utils import *
 
-"""
-    Args:
-        T (torch.nn.Module): The teacher model to be updated.
-        mt (str): Model type, e.g., "BPR", "LightGCN", or "VAE".
-        tl (DataLoader): Training data loader.
-        opt (torch.optim.Optimizer): Optimizer for the model.
-        crit (torch.nn.Module): Loss function.
-        sc (torch.cuda.amp.GradScaler): Gradient scaler for mixed precision training.
-        a (argparse.Namespace): Arguments containing training hyperparameters.
-        ttd (Dataset): Training dataset.
-        tvd (Dataset): Validation dataset.
-        ttds (Dataset): Test dataset.
-        Tsm (torch.Tensor): Teacher score matrix.
-        Ssm (torch.Tensor): Student score matrix.
-        Srm (torch.Tensor): Student replay matrix.
-        Psm (torch.Tensor): Previous score matrix.
-        Prm (torch.Tensor): Previous replay matrix.
-        CLsm (torch.Tensor): Current learning score matrix.
-        CLrm (torch.Tensor): Current learning replay matrix.
-        pR (torch.Tensor): Previous replay tensor.
-        ptu (torch.Tensor): Previous training updates.
-        mi (int): Model index.
-        ti (int): Task index.
-        nu_mt (torch.Tensor): New user model tensor.
-        nu_vm (torch.Tensor): New user validation matrix.
-        nu_tm (torch.Tensor): New user test matrix.
-        g (torch.device): Device to run the model on.
-    Returns:
-        dict: A dictionary containing evaluation results and best model parameters.
-"""
-
-
-def teacher_update(
-    T,
-    mt,
-    tl,
-    sc,
-    a,
-    ttd,
-    tvd,
-    ttds,
-    Tsm,
-    Ssm,
-    Srm,
-    Psm,
-    Prm,
-    CLsm,
-    CLrm,
-    pR,
-    ptu,
-    mi,
-    ti,
-    nu_mt,
-    nu_vm,
-    nu_tm,
-    g,
-):
-
-    # 对于BPR或LightGCN，将模型参数和聚类参数包装在一起
-    # ipdb.set_trace()
-    # p = [{"params": T.parameters()}, {"params": T.cluster}]
-    p = [{"params": T.parameters()}]
-    lt = ["base", "UI", "IU", "UU", "II", "cluster"]
-
-    # 初始化Adam优化器
-    opt = optim.Adam(p, lr=a.lr, weight_decay=a.reg)
-    # 使用二元交叉熵loss函数
-    crit = nn.BCEWithLogitsLoss(reduction="sum")
-    # 初始化评估参数
-    ea = {
-        "best_score": 0,
-        "test_score": 0,
-        "best_epoch": 0,
-        "best_model": None,
-        "score_mat": None,
-        "sorted_mat": None,
-        "base_model": None,
-        "patience": 0,
-        "avg_valid_score": 0,
-        "avg_test_score": 0,
-    }
-    tt = 0
-
-    gc.collect()
-    torch.cuda.empty_cache()
-    # 训练
-    for e in range(a.max_epoch):
-        print("\n[Epoch:" + str(e + 1) + "/" + str(a.max_epoch) + "]")
-        # 初始化每种loss类型的累计值
-        el = {f"epoch_{l}_loss": 0.0 for l in lt}
-        erl = 0.0
-        st = time.time()
-        # 负采样
-        tl.dataset.negative_sampling()
-
-        T.train()
-        for mb in tl:
-            # 正向传播计算loss
-
-            base_loss, UI_loss, IU_loss, UU_loss, II_loss, cluster_loss = T(mb)
-            batch_loss = (
-                base_loss
-                + a.LWCKD_lambda * (UI_loss + IU_loss + UU_loss + II_loss)
-                + (a.cluster_lambda * cluster_loss)
-            )
-            # 反向传播和优化
-            opt.zero_grad()
-            sc.scale(batch_loss).backward()
-            sc.step(opt)
-            sc.update()
-            # 更新loss
-            for l in lt:
-                el[f"epoch_{l}_loss"] += eval(f"{l}_loss").item()
-
-        for l in lt:
-            ln = f"epoch_{l}_loss"
-            el[ln] = round(el[ln] / len(tl), 4)
-
-        cft = time.time()
-        print(str(el) + ", CF_time = " + str(round(cft - st, 4)) + " seconds", end=" ")
-
-        ##2. 回放学习部分
-        if a.replay_learning and (mt in ["TransformerSelf"]):
-            # 判断是否使用退火技术来调整回放学习的权重
-            if a.annealing:
-                # 使用指数退火调整lambda，随着时间的推移逐渐减少回放学习的影响
-                replay_learning_lambda = a.replay_learning_lambda * torch.exp(
-                    torch.tensor(-e) / a.T
-                )
-            else:
-                replay_learning_lambda = a.replay_learning_lambda
-
-            # 打乱回放学习数据集
-            replay_learning_dataset = get_total_replay_learning_dataset_Teacher(
-                Tsm, Ssm, Srm, Psm, Prm, CLsm, CLrm, a
-            )
-            sl = random.sample(replay_learning_dataset, len(replay_learning_dataset))
-            ul, il, rl = list(zip(*sl))
-            it = (len(sl) // a.bs) + 1
-            erl = 0.0
-
-            for idx in range(it):
-                # 获取当前batch的数据
-                if idx + 1 == it:
-                    s = idx * a.bs
-                    en = -1
-                else:
-                    s = idx * a.bs
-                    en = (idx + 1) * a.bs
-                # 将用户、项目和评分转换为tensor
-                bu = torch.tensor(ul[s:en], dtype=torch.long).to(g)
-                bi = torch.tensor(il[s:en], dtype=torch.long).to(g)
-                batch_label = torch.tensor(rl[s:en], dtype=torch.float16).to(g)
-
-                # 获取用户和项目的embedding
-                ue, ie = T.base_model.get_embedding_weights()
-                bue = ue[bu]
-                bie = ie[bi]
-
-                # 计算loss
-                o = (bue * bie).sum(1)
-                batch_loss = crit(o, batch_label)
-                batch_loss *= replay_learning_lambda
-
-                # 反向传播和优化
-                opt.zero_grad()
-                sc.scale(batch_loss).backward()
-                sc.step(opt)
-                sc.update()
-                erl += batch_loss.item()
-
-            rlt = time.time()
-            print(
-                "epoch_replay_learning_loss = "
-                + str(round(erl / it, 4))
-                + ", replay_learning_lambda = "
-                + str(round(replay_learning_lambda.item(), 5))
-                + ", replay_learning_time = "
-                + str(round(rlt - cft, 4))
-                + " seconds",
-                end=" ",
-            )
-
-        et = time.time()
-        etime = et - st
-        tt += etime
-        print(
-            "epoch_time = "
-            + str(round(etime, 4))
-            + " seconds, total_time = "
-            + str(round(tt, 4))
-            + " seconds"
-        )
-
-        ##3. 评估
-        if e % 5 == 0:
-            print("\n[Evaluation]")
-            # 设置模型为评估模式
-            T.eval()
-            with torch.no_grad():
-                # 计算得分矩阵
-                Tsm, Tsmat = get_sorted_score_mat(T, topk=1000, return_sorted_mat=True)
-                # ipdb.set_trace()
-            # 获取当前任务的评估结果
-            vl, test_list = get_CL_result(
-                ttd,
-                tvd,
-                ttds,
-                Tsmat,
-                a.k_list,
-                current_task_idx=ti,
-                FB_flag=False,
-                return_value=True,
-            )
-
-            # 计算平均分数
-            avs = get_average_score(vl[: ti + 1], "valid_R20")
-            ats = get_average_score(test_list[: ti + 1], "test_R20")
-
-            # 根据配置选择验证集或测试集的平均分数
-            if a.eval_average_acc:
-                vs = avs
-                ts = ats
-            else:
-                vs = vl[ti]["valid_R20"]
-                ts = test_list[ti]["test_R20"]
-
-            # 获取新用户的评估结果
-            print("\t[The Result of new users in " + str(ti) + "-th Block]")
-            nur = get_eval_with_mat(nu_mt, nu_vm, nu_tm, Tsmat, a.k_list)
-            nurt = (
-                "valid_R20 = "
-                + str(nur["valid"]["R20"])
-                + ", test_R20 = "
-                + str(nur["test"]["R20"])
-            )
-            print("\t" + nurt + "\n")
-
-            # 如果当前得分高于历史最佳得分，更新最佳模型
-            if vs > ea["best_score"]:
-                print(
-                    "\t[Best Model Changed]\n\tvalid_score = "
-                    + str(round(vs, 4))
-                    + ", test_score = "
-                    + str(round(ts, 4))
-                )
-                ea["best_score"] = vs
-                ea["test_score"] = ts
-                ea["avg_valid_score"] = avs
-                ea["avg_test_score"] = ats
-
-                ea["best_epoch"] = e
-                ea["best_model"] = deepcopy(
-                    {k: v.cpu() for k, v in T.state_dict().items()}
-                )
-                ea["score_mat"] = deepcopy(Tsm)
-                ea["sorted_mat"] = deepcopy(Tsmat)
-                ea["patience"] = 0
-
-                bnur = deepcopy(nurt)
-
-            # patience 机制，用于早停，不知道哪里来的，文中没有提到
-            else:
-                ea["patience"] += 1
-                if ea["patience"] >= a.early_stop:
-                    print("[Early Stopping]")
-                    break
-
-            # 如果使用了回放学习，更新回放学习数据集
-            if a.replay_learning and e > 0:
-                replay_learning_dataset = get_total_replay_learning_dataset_Teacher(
-                    Tsm, Ssm, Srm, Psm, Prm, CLsm, CLrm, a
-                )
-                if mt == "VAE":
-                    tl = get_VAE_replay_learning_loader_integrate_with_R(
-                        replay_learning_dataset, pR, ptu, mi, a
-                    )
-
-        gc.collect()
-        torch.cuda.empty_cache()
-
-    # 打印最终结果
-    print("\n[Final result of teacher's update in the " + str(ti) + "-th data block]")
-    print(
-        "best_epoch = "
-        + str(ea["best_epoch"])
-        + ", valid_score = "
-        + str(ea["best_score"])
-        + ", test_score = "
-        + str(ea["test_score"])
-    )
-    print(
-        "avg_valid_score = "
-        + str(ea["avg_valid_score"])
-        + ", avg_test_score = "
-        + str(ea["avg_test_score"])
-    )
-
-    get_CL_result(
-        ttd,
-        tvd,
-        ttds,
-        ea["sorted_mat"],
-        a.k_list,
-        current_task_idx=a.num_task,
-        FB_flag=False,
-        return_value=False,
-    )
-
-    print("\t[The Result of new users in " + str(ti) + "-th Block]")
-    print("\t" + bnur + "\n")
-    ea["base_model"] = {
-        k[11:]: v.cpu()
-        for k, v in ea["best_model"].items()
-        if k.startswith("base_model")
-    }
-
-    return ea
-
 
 def main(args):
     """Main function for training and evaluation in Stage3:Teacher update"""
 
     gpu = f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu"
     scaler = torch.cuda.amp.GradScaler()
-    # ipdb.set_trace()
+
     # Validate dataset and model
     assert args.dataset in [
         "Gowalla",
@@ -360,7 +33,6 @@ def main(args):
 
     model_type = args.teacher
     model_seed = 0
-
     # Random Seed
     print(f"Random_seed = {model_seed}")
     set_random_seed(int(model_seed))
@@ -432,7 +104,7 @@ def main(args):
         args.S_load_path = f"ckpts/{args.dataset}/students/{args.student}/Test"
 
     if args.T_load_path is None:
-        args.T_load_path = f"ckpts/{args.dataset}/teachers/{model_type}"  # The student should be specified because the student and teacher collaboratively evolve along the data stream in our proposed CCD framework.
+        args.T_load_path = f"ckpts/{args.dataset}/teachers/{args.teacher}/"  # The student should be specified because the student and teacher collaboratively evolve along the data stream in our proposed CCD framework.
 
     print(
         f"Student = {args.student} (with low dimensionailty), S_load_path = {args.S_load_path}"
@@ -447,14 +119,9 @@ def main(args):
     load_P_model_dir_path = f"{args.S_load_path}/Plasticity"
     load_CL_model_dir_path = f"{args.S_load_path}/CL"
 
-    # Load the path of teacher
-    RRD_SM_dir_path = f"{args.T_load_path}/"
-
     # Load teacher
-    # RRD_SM_path = f"{RRD_SM_dir_path}/TASK_{distillation_idx}_score_mat.pth"
-    # if distillation_idx == 0:
     RRD_SM_path = (
-        f"ckpts/{args.dataset}/teachers/{model_type}/TASK_{args.target_task-1}.pth"
+        f"ckpts/{args.dataset}/teachers/{args.teacher}/TASK_{distillation_idx}.pth"
     )
     T_score_mat = (
         torch.load(RRD_SM_path, map_location=gpu)["score_mat"].detach().cpu()
@@ -472,7 +139,6 @@ def main(args):
         S_model_task_path = os.path.join(
             load_S_model_dir_path, f"TASK_{distillation_idx}.pth"
         )
-        # ipdb.set_trace()
         _, S_score_mat, S_sorted_mat = load_saved_model(S_model_task_path, gpu)
 
         print("\n[Evaluation for S_proxy]")
@@ -543,14 +209,13 @@ def main(args):
         u_size, i_size = negatvie_exclude.shape
         negatvie_exclude_expand = torch.full((p_total_user, i_size), -1.0)
         negatvie_exclude_expand[:u_size, :i_size] = negatvie_exclude
-        # ipdb.set_trace()
         negatvie_exclude = torch.cat(
             [negatvie_exclude_expand, torch.tensor(CL_sorted_mat[:, :40])], dim=1
         )
         del CL_sorted_mat
 
     # Dataset / DataLoader
-    if model_type in ["TransformerSelf", "MFSelf"]:
+    if model_type in ["BPR", "LightGCN", "TransformerSelf", "MFSelf"]:
         train_dataset = implicit_CF_dataset(
             p_total_user,
             p_total_item,
@@ -559,7 +224,7 @@ def main(args):
             p_train_interaction,
             negatvie_exclude,
         )
-    else:
+    elif model_type == "VAE":
         train_dataset = implicit_CF_dataset_AE(
             p_total_user, max_item, p_train_mat, is_user_side=True
         )
@@ -621,7 +286,7 @@ def main(args):
     ################################### Compose the initial dataset of replay learning (it adaptively changes through training) ##########################################################################################################################################################
 
     if args.replay_learning:
-        if model_type in ["TransformerSelf"]:
+        if model_type in ["BPR", "LightGCN", "TransformerSelf", "MFSelf"]:
             S_score_mat = (
                 torch.sigmoid(S_score_mat) if S_score_mat is not None else None
             )
@@ -632,7 +297,7 @@ def main(args):
                 torch.sigmoid(CL_score_mat) if CL_score_mat is not None else None
             )
 
-        else:
+        elif model_type == "VAE":
             S_score_mat = (
                 F.softmax(S_score_mat, dim=-1) if S_score_mat is not None else None
             )
@@ -665,36 +330,263 @@ def main(args):
         )
 
         # If the model is VAE, we use pseudo-labeling by imputing the replay_learning_dataset with args.VAE_replay_learning_value.
-        if model_type in ["VAE"]:
+        if model_type == "VAE":
             train_loader = get_VAE_replay_learning_loader_integrate_with_R(
                 replay_learning_dataset, p_R, p_total_user, max_item, args
             )
 
-    eval_args = teacher_update(
-        T=Teacher,
-        mt=model_type,
-        tl=train_loader,
-        sc=scaler,
-        a=args,
-        ttd=total_train_dataset,
-        tvd=total_valid_dataset,
-        ttds=total_test_dataset,
-        Tsm=T_score_mat,
-        Ssm=S_score_mat,
-        Srm=S_rank_mat,
-        Psm=P_score_mat,
-        Prm=P_rank_mat,
-        CLsm=CL_score_mat,
-        CLrm=CL_rank_mat,
-        pR=p_R,
-        ptu=p_total_user,
-        mi=max_item,
-        ti=task_idx,
-        nu_mt=new_user_train_mat,
-        nu_vm=new_user_valid_mat,
-        nu_tm=new_user_test_mat,
-        g=gpu,
+    ################################### Stage3: Teacher update ##########################################################################################################################################################
+
+    if model_type in ["BPR", "LightGCN", "TrasnformerSelf", "MFSelf"]:
+        param = [{"params": Teacher.parameters()}]
+        loss_type = ["base", "UI", "IU", "UU", "II"]
+
+    elif model_type == "VAE":
+        param = Teacher.parameters()
+        loss_type = ["base", "kl"]
+
+    optimizer = optim.Adam(param, lr=args.lr * 0.5, weight_decay=args.reg)
+    criterion = nn.BCEWithLogitsLoss(reduction="sum")
+
+    eval_args = {
+        "best_score": 0,
+        "test_score": 0,
+        "best_epoch": 0,
+        "best_model": None,
+        "score_mat": None,
+        "sorted_mat": None,
+        "patience": 0,
+        "avg_valid_score": 0,
+        "avg_test_score": 0,
+    }
+    total_time = 0
+
+    # Get gpu memory
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    for epoch in range(args.max_epoch):
+        print(f"\n[Epoch:{epoch + 1}/{args.max_epoch}]")
+        epoch_loss = {f"epoch_{l}_loss": 0.0 for l in loss_type}
+        epoch_replay_learning_loss = 0.0
+        start_time = time.time()
+        train_loader.dataset.negative_sampling()
+
+        Teacher.train()
+        for mini_batch in train_loader:
+            # Forward
+            if model_type in ["BPR", "LightGCN", "TransformerSelf", "MFSelf"]:
+                base_loss, UI_loss, IU_loss, UU_loss, II_loss, cluster_loss = Teacher(
+                    mini_batch
+                )
+                batch_loss = (
+                    base_loss
+                    + args.LWCKD_lambda * (UI_loss + IU_loss + UU_loss + II_loss)
+                    + (args.cluster_lambda * cluster_loss)
+                )
+
+            elif model_type == "VAE":
+                base_loss, kl_loss = Teacher(mini_batch)
+                batch_loss = base_loss + args.kl_lambda * kl_loss
+
+            # Backward
+            optimizer.zero_grad()
+            scaler.scale(batch_loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            for l in loss_type:
+                epoch_loss[f"epoch_{l}_loss"] += eval(f"{l}_loss").item()
+
+        for l in loss_type:
+            loss_name = f"epoch_{l}_loss"
+            epoch_loss[loss_name] = round(epoch_loss[loss_name] / len(train_loader), 4)
+
+        CF_time = time.time()
+        print(f"{epoch_loss}, CF_time = {CF_time - start_time:.4f} seconds", end=" ")
+
+        ############################################ replay_learning ############################################
+
+        if args.replay_learning and model_type in [
+            "BPR",
+            "LightGCN",
+            "TransformerSelf",
+            "MFSelf",
+        ]:
+            if args.annealing:
+                replay_learning_lambda = args.replay_learning_lambda * torch.exp(
+                    torch.tensor(-epoch) / args.T
+                )
+            else:
+                replay_learning_lambda = args.replay_learning_lambda
+
+            # Data shuffle
+            shuffled_list = random.sample(
+                replay_learning_dataset, len(replay_learning_dataset)
+            )
+            u_list, i_list, r_list = list(zip(*shuffled_list))
+            iteration = (len(shuffled_list) // args.bs) + 1
+            epoch_replay_learning_loss = 0.0
+
+            for idx in range(iteration):
+                if idx + 1 == iteration:
+                    start, end = idx * args.bs, -1
+                else:
+                    start, end = idx * args.bs, (idx + 1) * args.bs
+
+                # Batch
+                batch_user = torch.tensor(u_list[start:end], dtype=torch.long).to(gpu)
+                batch_item = torch.tensor(i_list[start:end], dtype=torch.long).to(gpu)
+                batch_label = torch.tensor(r_list[start:end], dtype=torch.float16).to(
+                    gpu
+                )
+
+                user_emb, item_emb = Teacher.base_model.get_embedding_weights()
+                batch_user_emb = user_emb[batch_user]
+                batch_item_emb = item_emb[batch_item]
+
+                # Forward
+                output = (batch_user_emb * batch_item_emb).sum(1)
+                batch_loss = criterion(output, batch_label)
+                batch_loss *= replay_learning_lambda
+
+                # Backward
+                optimizer.zero_grad()
+                scaler.scale(batch_loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                epoch_replay_learning_loss += batch_loss.item()
+
+            replay_learning_time = time.time()
+            print(
+                f"epoch_replay_learning_loss = {round(epoch_replay_learning_loss/iteration, 4)}, replay_learning_lambda = {replay_learning_lambda:.5f}, replay_learning_time = {replay_learning_time - CF_time:.4f} seconds",
+                end=" ",
+            )
+
+        # Time
+        end_time = time.time()
+        epoch_time = end_time - start_time
+        total_time += epoch_time
+        print(
+            f"epoch_time = {epoch_time:.4f} seconds, total_time = {total_time:.4f} seconds"
+        )
+
+        ############################################ EVAL ############################################
+
+        if epoch % 5 == 0:
+            print("\n[Evaluation]")
+            Teacher.eval()
+            with torch.no_grad():
+                if model_type in ["BPR", "LightGCN", "TransformerSelf", "MFSelf"]:
+                    T_score_mat, T_sorted_mat = get_sorted_score_mat(
+                        Teacher, topk=1000, return_sorted_mat=True
+                    )
+
+                elif model_type == "VAE":
+                    T_score_mat = (
+                        get_score_mat_for_VAE(Teacher.base_model, train_loader, gpu)
+                        .detach()
+                        .cpu()
+                    )
+                    T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
+
+            valid_list, test_list = get_CL_result(
+                total_train_dataset,
+                total_valid_dataset,
+                total_test_dataset,
+                T_sorted_mat,
+                args.k_list,
+                current_task_idx=task_idx,
+                FB_flag=False,
+                return_value=True,
+            )
+
+            avg_valid_score = get_average_score(valid_list[: task_idx + 1], "valid_R20")
+            avg_test_score = get_average_score(test_list[: task_idx + 1], "test_R20")
+
+            if args.eval_average_acc:
+                valid_score = avg_valid_score
+                test_score = avg_test_score
+            else:
+                valid_score = valid_list[task_idx]["valid_R20"]
+                test_score = test_list[task_idx]["test_R20"]
+
+            print(f"\t[The Result of new users in {task_idx}-th Block]")
+            new_user_results = get_eval_with_mat(
+                new_user_train_mat,
+                new_user_valid_mat,
+                new_user_test_mat,
+                T_sorted_mat,
+                args.k_list,
+            )
+            new_user_results_txt = f"valid_R20 = {new_user_results['valid']['R20']}, test_R20 = {new_user_results['test']['R20']}"
+            print(f"\t{new_user_results_txt}\n")
+
+            if valid_score > eval_args["best_score"]:
+                print(
+                    f"\t[Best Model Changed]\n\tvalid_score = {valid_score:.4f}, test_score = {test_score:.4f}"
+                )
+                eval_args["best_score"] = valid_score
+                eval_args["test_score"] = test_score
+                eval_args["avg_valid_score"] = avg_valid_score
+                eval_args["avg_test_score"] = avg_test_score
+
+                eval_args["best_epoch"] = epoch
+                eval_args["best_model"] = deepcopy(
+                    {k: v.cpu() for k, v in Teacher.state_dict().items()}
+                )  # deepcopy(Teacher)
+                eval_args["score_mat"] = deepcopy(T_score_mat)
+                eval_args["sorted_mat"] = deepcopy(T_sorted_mat)
+                eval_args["patience"] = 0
+
+                best_new_user_results = deepcopy(new_user_results_txt)
+            # else:
+            #     eval_args["patience"] += 1
+            #     if eval_args["patience"] >= args.early_stop:
+            #         print("[Early Stopping]")
+            #         break
+
+            if args.replay_learning and epoch > 0:
+                replay_learning_dataset = get_total_replay_learning_dataset_Teacher(
+                    T_score_mat,
+                    S_score_mat,
+                    S_rank_mat,
+                    P_score_mat,
+                    P_rank_mat,
+                    CL_score_mat,
+                    CL_rank_mat,
+                    args,
+                )
+                if model_type == "VAE":
+                    train_loader = get_VAE_replay_learning_loader_integrate_with_R(
+                        replay_learning_dataset, p_R, p_total_user, max_item, args
+                    )
+
+        # Get gpu memory
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    # Final result
+    print(f"\n[Final result of teacher's update in the {task_idx}-th data block]")
+    print(
+        f"best_epoch = {eval_args['best_epoch']}, valid_score = {eval_args['best_score']}, test_score = {eval_args['test_score']}"
     )
+    print(
+        f"avg_valid_score = {eval_args['avg_valid_score']}, avg_test_score = {eval_args['avg_test_score']}"
+    )
+
+    get_CL_result(
+        total_train_dataset,
+        total_valid_dataset,
+        total_test_dataset,
+        eval_args["sorted_mat"],
+        args.k_list,
+        current_task_idx=args.num_task,
+        FB_flag=False,
+        return_value=False,
+    )
+
+    print(f"\t[The Result of new users in {task_idx}-th Block]")
+    print(f"\t{best_new_user_results}\n")
 
     # Model save
     if args.save:
@@ -705,7 +597,7 @@ def main(args):
         else:
             save_path = args.T_load_path
 
-        Teacher_dir_path = save_path  # model name
+        Teacher_dir_path = os.path.join(save_path, args.teacher)  # model name
 
         if not os.path.exists(Teacher_dir_path):
             os.makedirs(Teacher_dir_path)
@@ -715,7 +607,6 @@ def main(args):
             {
                 "best_model": eval_args["best_model"],
                 "score_mat": eval_args["score_mat"],
-                "checkpoint": eval_args["base_model"],
             },
         )
 
@@ -743,18 +634,14 @@ if __name__ == "__main__":
         type=str,
         default=None,
     )
-    parser.add_argument(
-        "--S_model_path", type=str, default="ckpts/New_Student/Stability"
-    )
-    parser.add_argument(
-        "--P_model_path", type=str, default="ckpts/New_Student/Plasticity"
-    )
-    parser.add_argument("--CL_model_path", type=str, default="ckpts/New_Student/CL")
-    parser.add_argument("--RRD_SM_path", type=str, default="ckpts/New_Teacher/Ensemble")
+    parser.add_argument("--S_model_path", type=str, default=None)
+    parser.add_argument("--P_model_path", type=str, default=None)
+    parser.add_argument("--CL_model_path", type=str, default=None)
+    parser.add_argument("--RRD_SM_path", type=str, default=None)
     parser.add_argument(
         "--tcp",
         type=str,
-        default="ckpts/New_Teacher",
+        default=None,
         help="Teacher Ckpt Path",
     )
 
@@ -770,7 +657,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--nns", help="the number of negative sample", type=int, default=1
     )
-    parser.add_argument("--td", help="teacher embedding dims", type=int, default=512)
+    parser.add_argument("--td", help="teacher embedding dims", type=int, default=64)
 
     # LWCKD + PIW
     parser.add_argument("--nc", help="num_cluster", type=int, default=10)
@@ -864,17 +751,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--S_load_path", "--Slp", type=str, default=None)
     parser.add_argument("--T_load_path", "--Tlp", type=str, default=None)
-    parser.add_argument(
-        "--student",
-        type=str,
-        default=None,
-        help="TransformerSelf, GCNSelf, MFSelf or VAESelf",
-    )
+    parser.add_argument("--student", type=str, default=None, help="LightGCN_0, BPR_0")
     parser.add_argument(
         "--teacher",
         type=str,
         default=None,
-        help="TransformerSelf, GCNSelf, MFSelf or VAESelf",
+        help="LightGCN_0, ..., LightGCN_4, BPR_0, ..., BPR_4, VAE_0, VAE_2",
     )
 
     args = parser.parse_args()
@@ -884,6 +766,7 @@ if __name__ == "__main__":
     #     args.td = 64
     # elif args.dataset == "Yelp":
     #     args.td = 128
+    args.td = 512
 
     print_command_args(args)
     main(args)

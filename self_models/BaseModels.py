@@ -37,7 +37,12 @@ class ModelSelf(nn.Module):
         return torch.cat((pos_emb, neg_emb), dim=-1), u
 
     def get_score_mat(self, user=None):
-        u_emb, i_emb = self.get_embedding_weights()
+        users = torch.arange(0, self.user_count).long().cuda()
+        items = torch.arange(0, self.item_count).long().cuda()
+        with torch.no_grad():
+            u_emb = self.user_emb(users)
+            i_emb = self.item_emb(items)
+        # u_emb, i_emb = self.get_embedding_weights()
         mat = u_emb @ i_emb.T
         if user is None:
             return mat
@@ -106,10 +111,42 @@ class TransformerSelf(ModelSelf):
         )  # (batch_size, 2, embedding_dim)
 
         # 取最后一个位置的输出
-        pos_score = self.fc(pos_output[:, -1, :])  # (batch_size, 1)
-        neg_score = self.fc(neg_output[:, -1, :])  # (batch_size, 1)
+        pos_score = self.fc(u * pos_output).sum(dim=1, keepdim=True)
+        neg_score = self.fc(u * neg_output).sum(dim=1, keepdim=True)
+        # pos_score = self.fc(pos_output[:, -1, :])  # (batch_size, 1)
+        # neg_score = self.fc(neg_output[:, -1, :])  # (batch_size, 1)
 
         return pos_score, neg_score, torch.cat((pos_emb, neg_emb), dim=-1), u
+
+    def get_embedding(self, mini_batch):
+        user = mini_batch["user"]
+        pos_item = mini_batch["pos_item"]
+        neg_item = mini_batch["neg_item"]
+
+        # get embeddings of users and items
+        u = self.user_emb(user)  # .unsqueeze(1)  # (batch_size, 1, embedding_dim)
+        pos_emb = self.item_emb(
+            pos_item
+        )  # .unsqueeze(1)  # (batch_size, 1, embedding_dim)
+        neg_emb = self.item_emb(
+            neg_item
+        )  # .unsqueeze(1)  # (batch_size, 1, embedding_dim)
+        pos_output = self.transformer_encoder(pos_emb)  # (batch_size, 2, embedding_dim)
+        neg_output = self.transformer_encoder(neg_emb)  # (batch_size, 2, embedding_dim)
+        return torch.cat((pos_output, neg_output), dim=-1), u
+
+    def get_score_mat(self, user=None):
+        users = torch.arange(0, self.user_count).long().to("cuda:1")
+        items = torch.arange(0, self.item_count).long().to("cuda:1")
+        with torch.no_grad():
+            u_emb = self.transformer_encoder(self.user_emb(users))
+            i_emb = self.transformer_encoder(self.item_emb(items))
+        # u_emb, i_emb = self.get_embedding_weights()
+        mat = u_emb @ i_emb.T
+        if user is None:
+            return mat
+        else:
+            return torch.index_select(mat, 0, user)
 
 
 class GCNSelf(ModelSelf):

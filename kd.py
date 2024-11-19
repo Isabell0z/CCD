@@ -1,5 +1,6 @@
 import argparse
 import sys
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -11,7 +12,7 @@ from KD_utils.DE import Expert, compute_DE_loss
 from KD_utils.RRD import compute_RRD_loss
 from KD_utils.dataset import KDDataset
 from self_models.BaseModels import TransformerSelf, VAESelf, GCNSelf, MFSelf
-from Utils.utils import merge_model_kd
+from Utils.utils import merge_model_kd, eval_task
 
 
 class KD:
@@ -78,7 +79,7 @@ class KD:
                 {"params": self.user_experts.parameters()},
                 {"params": self.item_experts.parameters()},
             ],
-            lr=0.01,
+            lr=0.001,
         )
         optimizer_base = torch.optim.Adam(self.student_model.parameters(), lr=0.0005)
         pbar = tqdm(range(epoch), desc="Training")
@@ -130,11 +131,19 @@ class KD:
                 base_loss_sum += base_loss.item()
             pbar.set_postfix({"loss": loss_sum, "base_loss": base_loss_sum})
 
-    def save_models(self, save_path, task, loaded_model):
+    def eval(self, task, args):
+        sorted_mat = self.student_model.get_top_k(K=20)
+        task_data = f"dataset/{args.dataset}/TASK_{task}.pickle"
+        r_mean = eval_task(task_data, sorted_mat.indices, k=20, save_txt=True)
+        print(r_mean)
+
+    def save_models(self, save_path, task, loaded_model=None):
         if not os.path.exists(save_path):
             os.makedirs(save_path)
         if loaded_model is not None:
             best_model = merge_model_kd(loaded_model, self.student_model.state_dict())
+        else:
+            best_model = None
         torch.save(
             {
                 "best_model": best_model,
@@ -229,6 +238,8 @@ def main(args):
             f"ckpts/{args.dataset}/students/{args.model}/Test/CL/TASK_{args.target_task}.pth"
         )
         student_model.load_state_dict(s_ckpt["checkpoint"])
+    else:
+        s_ckpt = None
     if args.load:
         experts = {
             "item_experts": torch.load(
@@ -258,12 +269,20 @@ def main(args):
     )
     # run kd
     kd.train(epoch=args.max_epoch)
+    kd.eval(args.target_task, args)
     # save
-    kd.save_models(
-        f"{students_path}/{model_name}/Test/Distilled/",
-        task=args.target_task,
-        loaded_model=s_ckpt["best_model"],
-    )
+    if s_ckpt is not None:
+        kd.save_models(
+            f"{students_path}/{model_name}/Test/Distilled/",
+            task=args.target_task,
+            loaded_model=s_ckpt["best_model"],
+        )
+    else:
+        kd.save_models(
+            f"{students_path}/{model_name}/Test/Distilled/",
+            task=args.target_task,
+            loaded_model=None,
+        )
     # end
 
 

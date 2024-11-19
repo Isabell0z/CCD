@@ -176,7 +176,7 @@ def Teacher_update(
     args,
 ):
     """Update Teacher model from before model to present model including new users/items"""
-    if model_type in ["BPR", "LightGCN", "TransformerSelf"]:
+    if model_type in ["BPR", "LightGCN", "TransformerSelf", "MFSelf"]:
         b_user_mapping, b_item_mapping, b_rating_mat, UU, II = get_info_for_BPR_Teacher(
             b_user_ids, b_item_ids, b_train_dict
         )
@@ -265,7 +265,7 @@ def get_teacher_model(
     Teacher = PIW_LWCKD(
         T_base_model,
         LWCKD_flag=False,  # True
-        PIW_flag=True,
+        PIW_flag=False,
         temperature=args.T,
         num_cluster=args.nc,
         dim=args.td,
@@ -279,7 +279,7 @@ def get_teacher_model(
         T_score_mat = pth["score_mat"].detach().cpu()
         T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
         T_base_weight = pth["checkpoint"]  # LightGCN_0
-        Teacher.T_base_model.load_state_dict(T_base_weight)
+        Teacher.base_model.load_state_dict(T_base_weight)
     else:
         T_model_path = os.path.join(args.T_load_path, f"TASK_{task_idx - 1}.pth")
         # T_model_path = f"ckpts/Yelp/teachers/TransformerSelf/TASK_{task_idx - 1}.pth"
@@ -2051,6 +2051,8 @@ def freeze(model):
 
 def save_model(dir_path, task_idx, dict):
     save_path = os.path.join(dir_path, f"TASK_{task_idx}.pth")
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path)
     torch.save(dict, save_path)
     print(f"[Model Save Success] save_path = {save_path}")
 
@@ -2064,3 +2066,35 @@ def merge_model_kd(model, new_model):
         if k.startswith("base_model"):
             model[k] = new_model[k[11:]]
     return model
+
+
+def eval_task(task_data, sorted_mat, k=20, save_txt=False):
+    with open(task_data, "rb") as f:
+        task_dict = pickle.load(f)["test_dict"]
+    # data_size = len(task_dict.keys())
+    r_list = []
+    # ipdb.set_trace()
+    for key, v in task_dict.items():
+        hit = 0
+        for item in v:
+            if item in sorted_mat[key]:
+                hit += 1
+        r_list.append(hit / len(v))
+    r_mean = np.mean(np.array(r_list))
+    if save_txt:
+        with open(f"recal_{k}.txt", "w") as f:
+            f.write(str(r_mean))
+    return r_mean
+
+
+def eval_all_task(sorted_mat, task_num, args, k=20):
+    r_list = []
+    for task in range(1, task_num + 1):
+        task_data = f"dataset/{args.dataset}/TASK_{task}.pickle"
+        r = eval_task(task_data, sorted_mat, k)
+        r_list.append(r)
+    return r_list
+
+
+def h_mean(la, ra):
+    return 2 * la * ra / (la + ra)
