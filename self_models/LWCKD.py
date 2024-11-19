@@ -447,29 +447,11 @@ class PIW_LWCKD(nn.Module):
         self.II = II
 
         # saving the before embedding
-        if self.model_type in ["TransformerSelf"]:
-            self.before_user_emb = self.base_model.user_emb.weight[
-                before_user_ids
-            ].detach()
-            self.before_item_emb = self.base_model.item_emb.weight[
-                before_item_ids
-            ].detach()
-            self.before_user_emb.requires_grad = False
-            self.before_item_emb.requires_grad = False
 
-        elif self.model_type == "LightGCN":
-            self.num_layer = self.base_model.num_layer
-            self.before_user_emb, self.before_item_emb = self.base_model.get_embedding(
-                return_all=True
-            )
-            for i in range(self.num_layer):
-
-                self.before_user_emb[i] = self.before_user_emb[i].detach()
-                self.before_user_emb[i].requires_grad = False
-
-                self.before_item_emb[i] = self.before_item_emb[i].detach()
-                self.before_item_emb[i].requires_grad = False
-            self.base_model.SNM = SNM
+        self.before_user_emb = self.base_model.user_emb.weight[before_user_ids].detach()
+        self.before_item_emb = self.base_model.item_emb.weight[before_item_ids].detach()
+        self.before_user_emb.requires_grad = False
+        self.before_item_emb.requires_grad = False
 
         self.base_model.user_emb = nn.Embedding.from_pretrained(
             torch.cat([user_emb, new_user_embedding])
@@ -491,24 +473,13 @@ class PIW_LWCKD(nn.Module):
             self.v = len(present_item_ids) - 1
 
             # Random initalization
-            if self.model_type in ["TransformerSelf"]:
-                cluster_id = present_item_ids[
-                    random.sample(range(len(present_item_ids)), self.num_cluster)
-                ]
-                self.cluster = deepcopy(
-                    self.base_model.item_emb.weight[cluster_id].detach()
-                )
-                self.cluster.requires_grad_(True)
-
-            elif self.model_type == "LightGCN":
-                self.cluster = []
-                for i in range(self.num_layer):
-                    cluster_id = before_item_ids[
-                        random.sample(range(len(before_item_ids)), self.num_cluster)
-                    ]
-                    cluster = deepcopy(self.before_item_emb[i][cluster_id].detach())
-                    cluster.requires_grad = True
-                    self.cluster.append(cluster)
+            cluster_id = present_item_ids[
+                random.sample(range(len(present_item_ids)), self.num_cluster)
+            ]
+            self.cluster = deepcopy(
+                self.base_model.item_emb.weight[cluster_id].detach()
+            )
+            self.cluster.requires_grad_(True)
 
     def get_cluster_loss(self, item_emb, cluster):
         present_item_emb = item_emb[self.present_item_ids]

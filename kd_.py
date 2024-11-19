@@ -5,9 +5,6 @@ import sys
 import os
 from copy import deepcopy
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.dirname(SCRIPT_DIR))
-
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -33,15 +30,13 @@ def main(args):
 
     # Load the path of student-side models (S_proxy, P_proxy, Student)
     Student_load_path = f"ckpts/{args.dataset}/students/{args.model}/Test"
-    print("Student_load_path", Student_load_path)
-
     load_S_proxy_dir_path = f"{Student_load_path}/Stability"
     load_P_proxy_dir_path = f"{Student_load_path}/Plasticity"
     load_CL_model_dir_path = f"{Student_load_path}/CL"
 
     # Load the path of teacher
-    RRD_SM_dir = f"ckpts/{args.dataset}/teachers/{args.model}"
-    print("Teacher_load_path", RRD_SM_dir)
+    teacher_dir = f""
+    print("Teacher_load_path", teacher_dir)
 
     # Load dataset
     data_path = f"dataset/{args.dataset}/total_blocks_timestamp.pickle"
@@ -52,11 +47,9 @@ def main(args):
         load_data_as_dict(data_dict_path, num_task=args.num_task)
     )
 
-    print(total_train_dataset.keys())
-
     # Determine target task index
     distillation_idx = args.target_task
-    print(f"\n[Distillation_idx((K-1)-th Data Block) = {distillation_idx}]")
+    print(f"KD task: ")
 
     # Data block for Stage 1 (i.e., k-1 th)
     p_block = total_blocks[distillation_idx]
@@ -73,29 +66,15 @@ def main(args):
     )
     R = make_R(p_total_user, p_total_item, p_train_mat)  # Rating matrix
 
-    print(f"p_total_user = {p_total_user}, p_total_item = {p_total_item}")
-    for mat_name in ["p_train_mat", "p_valid_mat", "p_test_mat"]:
-        print(f"num of {mat_name} = {len(sum([], eval(mat_name).values()))}")
-
-    # Evaluation of Ensemble Teacher
-    RRD_SM_path = f"{RRD_SM_dir}/TASK_{distillation_idx}.pth"
-
-    T_score_mat = (
-        torch.load(RRD_SM_path, map_location=gpu)["score_mat"].detach().cpu()
-    )  # Teacher Score Mat for RRD
-    T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
-
-    print("\n[Evaluation of an Ensemble Teacher System]")
-    get_CL_result(
-        total_train_dataset,
-        total_valid_dataset,
-        total_test_dataset,
-        T_sorted_mat,
-        args.k_list,
-        distillation_idx,
+    # load the teacher model
+    teacher_path = (
+        f"ckpts/{args.dataset}/teachers/{args.model}/TASK_{distillation_idx}.pth"
     )
+    t_ckpt = torch.load(teacher_path, map_location=gpu)
+    T_score_mat = t_ckpt["score_mat"].detach().cpu()
+    T_sorted_mat = t_ckpt["sorted_mat"].detach().cpu()
 
-    # Train/test/valid data split for new users/items
+    # lfilter new datas
     if distillation_idx >= 1:
         b_block = total_blocks[distillation_idx - 1]
         b_total_user = b_block.user.max() + 1
@@ -105,7 +84,7 @@ def main(args):
             )
         )
 
-        print(f"\n\t[The Result of new users in {distillation_idx}-th Block]")
+        print(f"loaded new data")
         new_user_results = get_eval_with_mat(
             new_user_train_mat,
             new_user_valid_mat,
@@ -157,11 +136,9 @@ def main(args):
         p_total_user, p_total_item, p_SNM, gpu, args, model_type, model_weight=None
     ).to(gpu)
 
-    print(f"\n[Student for Distillation]\n {D_Student}")
+    print(f"loaded model")
 
-    ######################################################## Knowledge Distillation ########################################################
-
-    optimizer = optim.Adam(D_Student.parameters(), lr=args.lr, weight_decay=args.reg)
+    optimizer = optim.Adam(D_Student.parameters(), lr=args.lr, weight_decay=1e-4)
     eval_args = {
         "best_score": 0,
         "test_score": 0,
@@ -239,9 +216,6 @@ def main(args):
             scaler.step(optimizer)
             scaler.update()
 
-            if args.one_iteration:
-                break
-
         ## IR_RRD ##
         iteration = (len(RRD_item_ids) // args.bs) + 1
         shuffle_item_ids = RRD_item_ids[torch.randperm(RRD_item_ids.size(0))]
@@ -279,9 +253,6 @@ def main(args):
             scaler.scale(IR_RRD_loss).backward()
             scaler.step(optimizer)
             scaler.update()
-
-            if args.one_iteration:
-                break
 
         # Training Result
         end_time = time.time()
@@ -335,7 +306,6 @@ def main(args):
                 test_score = test_list[distillation_idx]["test_R20"]
 
             if distillation_idx >= 1:
-                print(f"\n\t[The Result of new users in {distillation_idx}-th Block]")
                 new_user_results = get_eval_with_mat(
                     new_user_train_mat,
                     new_user_valid_mat,
@@ -344,7 +314,6 @@ def main(args):
                     args.k_list,
                 )
                 new_user_results_txt = f"valid_R20 = {new_user_results['valid']['R20']}, test_R20 = {new_user_results['test']['R20']}"
-                print(f"\t{new_user_results_txt}\n")
             else:
                 new_user_results_txt = None
 
@@ -372,8 +341,6 @@ def main(args):
         # get gpu memory
         gc.collect()
         torch.cuda.empty_cache()
-        if args.one_iteration:
-            break
 
     # Final Result Report
     print(f"\n[Final result of KD (Stage1) in the distilled idx {distillation_idx}]")
@@ -401,11 +368,8 @@ def main(args):
 
     # Paramters save
     if args.save:
-        if args.save_path is None:
-            save_path = Student_load_path
-        else:
-            save_path = args.save_path
 
+        save_path = Student_load_path
         save_dir_path = os.path.join(save_path, "Distilled")
         if not os.path.exists(save_dir_path):
             os.makedirs(save_dir_path)
@@ -414,23 +378,16 @@ def main(args):
         model_state = {
             "best_model": eval_args["best_model"],  # .cpu(),
             "score_mat": eval_args["score_mat"],
+            "sorted_mat": torch.topk(eval_args["score_mat"], k=1000, dim=1).indices,
         }
 
         torch.save(model_state, save_path)
 
-        print("[Model Saved]\n save_path = ", save_path)
+        print("saved model at path = ", save_path)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-
-    # RRD
-    parser.add_argument(
-        "--RRD_SM_path",
-        help="the path of the ensembeled teacher's score mat",
-        type=str,
-        default=None,
-    )
 
     parser.add_argument("--uninterested_sample_epoch", type=int, default=10)
 
@@ -492,22 +449,10 @@ if __name__ == "__main__":
 
     # SAVE
     parser.add_argument(
-        "--one_iteration",
-        "--oi",
-        action=argparse.BooleanOptionalAction,
-        help="whether saving param or not (--s or --no-s)",
-    )
-    parser.add_argument(
         "--save",
         "--s",
         action=argparse.BooleanOptionalAction,
         help="whether saving param or not (--s or --no-s)",
-    )
-    parser.add_argument(
-        "--save_path",
-        "--sp",
-        type=str,
-        default=None,
     )
 
     # Data / Model / Target_task (i.e., k-th data block)

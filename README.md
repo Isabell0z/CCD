@@ -12,19 +12,13 @@ data mining
 │  └─Yelp
 │     ├─students (student models saved here)
 │     │  
-│     └─teachers (teacher models put here)
-│        ├─MFSelf
-│        │ └─TASK_0.pth
-│        ├─TransformerSelf
-│        │ └─TASK_0.pth
-│        └─VAESelf
-│          └─TASK_0.pth
+│     └─teachers (teacher models saved here)
+│        └─MFSelf
+│          └─TASK_0.pth (example)
 ├─ensemble_utils
+│  └─ensemble.py
 ├─KD_utils
-├─llw
-│  ├─dataset
-│  │  ├─Gowalla
-│  │  └─Gowalla_new0
+│  ├─dataset.py
 │  ├─data_process
 │  └─Utils
 ├─originalCCD

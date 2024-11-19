@@ -176,7 +176,7 @@ def Teacher_update(
     args,
 ):
     """Update Teacher model from before model to present model including new users/items"""
-    if model_type in ["BPR", "LightGCN", "TransformerSelf", "MFSelf"]:
+    if model_type in ["TransformerSelf", "MFSelf"]:
         b_user_mapping, b_item_mapping, b_rating_mat, UU, II = get_info_for_BPR_Teacher(
             b_user_ids, b_item_ids, b_train_dict
         )
@@ -209,16 +209,6 @@ def Teacher_update(
                 Teacher, topk=1000, return_sorted_mat=True
             )
         Teacher = Teacher.to(gpu)
-
-        del common_interaction, T_score_mat
-
-        with torch.no_grad():
-            T_score_mat = (
-                get_score_mat_for_VAE(Teacher.base_model, train_loader, gpu)
-                .detach()
-                .cpu()
-            )
-            T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
 
     return Teacher, T_score_mat, T_sorted_mat
 
@@ -272,90 +262,9 @@ def get_teacher_model(
         # T_model_path = f"ckpts/Yelp/teachers/TransformerSelf/TASK_{task_idx - 1}.pth"
         pth = torch.load(T_model_path, map_location=gpu)
         T_score_mat = pth["score_mat"].detach().cpu()
-        T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
+        T_sorted_mat = pth["sorted_mat"].detach().cpu().numpy()
         T_weight = pth["best_model"]  # LightGCN_0
         Teacher.load_state_dict(T_weight)
-
-    # if T_weight is not None:
-    #     try:
-    #         if type(T_weight) != dict:
-    #             T_weight = T_weight.state_dict()
-    #         Teacher.load_state_dict(T_weight)
-    #         print("Teacher's weight loading Success!")
-    #     except:
-    #         print("Teacher's weight loading Fail!")
-    #         pass
-
-    return Teacher, T_sorted_mat
-
-
-def get_teacher_model_origin(
-    model_type, b_total_user, b_total_item, b_R, task_idx, max_item, gpu, args
-):
-    """Load teacher model"""
-    if model_type == "VAE":
-        model_args = [b_total_user, max_item, args.td, gpu]
-
-    elif model_type == "LightGCN":
-        b_SNM = get_SNM(b_total_user, b_total_item, b_R, gpu)
-        model_args = [
-            b_total_user,
-            b_total_item,
-            args.td,
-            gpu,
-            b_SNM,
-            args.num_layer,
-            args.using_layer_index,
-        ]  # user_count, item_count, dim, gpu, SNM, num_layer, CF_return_average, RRD_return_average
-
-    elif model_type == "BPR":
-        model_args = [b_total_user, b_total_item, args.td, gpu]
-
-    if task_idx == 1:
-        T_weight = None
-        if args.dataset == "Yelp":
-            T_model_path = f"../ckpt/Yelp/Teacher/base_teacher/{args.teacher}/Base_Model.pth"  # m = LightGCN_0, ..., LightGCN_4 (5)
-            pth = torch.load(T_model_path, map_location=gpu)
-            T_score_mat = pth["score_mat"].detach().cpu()
-            T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
-            T_base_weight = pth["best_model"]  # LightGCN_0
-
-            T_base_model = eval(model_type)(*model_args)
-            T_base_model.load_state_dict(T_base_weight)
-    else:
-        T_model_path = os.path.join(args.T_load_path, f"TASK_{task_idx - 1}.pth")
-
-        pth = torch.load(T_model_path, map_location=gpu)
-        T_score_mat = pth["score_mat"].detach().cpu()
-        T_sorted_mat = to_np(torch.topk(T_score_mat, k=1000).indices)
-        T_weight = pth["best_model"]  # LightGCN_0
-
-    T_base_model = eval(model_type)(*model_args)
-
-    if model_type in ["BPR", "LightGCN"]:
-        Teacher = PIW_LWCKD(
-            T_base_model,
-            LWCKD_flag=True,
-            PIW_flag=True,
-            temperature=args.T,
-            num_cluster=args.nc,
-            dim=args.td,
-            gpu=gpu,
-            model_type=model_type,
-        )
-
-    elif model_type == "VAE":
-        Teacher = CL_VAE_expand(T_base_model, args.td, gpu)
-
-    if T_weight is not None:
-        try:
-            if type(T_weight) != dict:
-                T_weight = T_weight.state_dict()
-            Teacher.load_state_dict(T_weight)
-            print("Teacher's weight loading Success!")
-        except:
-            print("Teacher's weight loading Fail!")
-            pass
 
     return Teacher, T_sorted_mat
 
@@ -1989,18 +1898,6 @@ def weighted_merge_emb(b_user_emb, p_user_emb, b_weight, p_weight):
     bp_user_emb = deepcopy(p_user_emb)
     bp_user_emb[:u_size] = p_weight * bp_user_emb[:u_size] + b_weight * b_user_emb
     return bp_user_emb
-
-
-def get_score_mat_for_VAE(model, train_loader, gpu):
-    model = model.to(gpu)
-    score_mat = torch.zeros(model.user_count, model.item_count)
-    with torch.no_grad():
-        for mini_batch in train_loader:
-            mini_batch = {key: value.to(gpu) for key, value in mini_batch.items()}
-            output = model.forward_eval(mini_batch)
-            # output = model.forward(mini_batch, return_score = True)
-            score_mat[mini_batch["user"], :] = output.cpu()
-    return score_mat
 
 
 def get_sorted_score_mat(model, topk=1000, return_sorted_mat=False):

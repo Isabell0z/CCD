@@ -85,8 +85,6 @@ def teacher_update(
 ):
 
     # 对于BPR或LightGCN，将模型参数和聚类参数包装在一起
-    # ipdb.set_trace()
-    # p = [{"params": T.parameters()}, {"params": T.cluster}]
     p = [{"params": T.parameters()}]
     lt = ["base", "UI", "IU", "UU", "II", "cluster"]
 
@@ -715,6 +713,7 @@ def main(args):
             {
                 "best_model": eval_args["best_model"],
                 "score_mat": eval_args["score_mat"],
+                "sorted_mat": torch.topk(eval_args["score_mat"], k=1000, dim=1).indices,
                 "checkpoint": eval_args["base_model"],
             },
         )
@@ -879,14 +878,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Teacher's embedding dimension
-    # if args.dataset == "Gowalla":
-    #     args.td = 64
-    # elif args.dataset == "Yelp":
-    #     args.td = 128
-
     print_command_args(args)
     main(args)
     print_command_args(args)
-
-    # run code: python -u T_update.py --d Yelp --student LightGCN_1 --teacher LightGCN_0 --tt 5 --rl --UCL --US --UP --ab 100 --ss 1 --ps 5 --cs 1 --max_epoch 10

@@ -13,7 +13,7 @@ from KD_utils.dataset import KDDataset
 
 
 def main(args):
-    torch.manual_seed(args.id + 1)
+    torch.manual_seed(1)
     device = f"cuda:{args.cuda}" if torch.cuda.is_available() else "cpu"
     save_path = f"ckpts/{args.dataset}/teachers"
     if not os.path.exists(save_path):
@@ -58,12 +58,12 @@ def main(args):
         sys.exit()
 
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=(args.id + 1) * 0.00132)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.00132)
 
     print(f"training")
     # train
     model.train()
-    pbar = tqdm(range(200), desc="training epoch")
+    pbar = tqdm(range(args.max_epoch), desc="training epoch")
     for epoch in pbar:
         total_loss = 0
         for batch in dataloader:
@@ -86,7 +86,7 @@ def main(args):
             "score_mat": model.get_score_mat(),
             "sorted_mat": model.get_top_k(1000).indices,
         },
-        f"{save_path}/{model_name}/TASK_0_{args.id}.pth",
+        f"{save_path}/{model_name}/TASK_0.pth",
     )
     print("Training complete.")
 
@@ -99,7 +99,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset", "--d", type=str, default=None, help="Gowalla or Yelp"
     )
-    parser.add_argument("--cuda", "-c", type=str, default="0", help="device id")
-    parser.add_argument("--id", "-i", type=int, default=0, help="model id")
+    parser.add_argument("--cuda", "--c", type=str, default="0", help="device id")
+    parser.add_argument("--max_epoch", "--me", type=int)
+    # parser.add_argument("--id", "-i", type=int, default=0, help="model id")
     args = parser.parse_args()
     main(args)
